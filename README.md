@@ -325,6 +325,8 @@ For production deployments, create a custom security role with minimal permissio
 
 ⚠️ **Security Note**: Never commit `.env` files. All secrets should be stored in Netlify environment variables for production.
 
+🔒 **Security Features**: This application implements comprehensive security measures including error sanitization, rate limiting, input validation, and secure logging. See [SECURITY_ASSESSMENT.md](./SECURITY_ASSESSMENT.md) for detailed security analysis.
+
 ## 🧪 Development
 
 ### Run Development Server

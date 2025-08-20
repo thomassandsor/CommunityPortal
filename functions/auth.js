@@ -6,19 +6,48 @@
  * 
  * The Service Principal (App Registration) approach is used for secure, production-ready
  * authentication that doesn't require user delegation.
+ * 
+ * Security features:
+ * - Rate limiting protection
+ * - Error message sanitization
+ * - Secure logging
+ * - CORS policy enforcement
+ * - Security headers
  */
 
-export const handler = async (event, context) => {
+import { 
+    sanitizeError, 
+    SecureLogger, 
+    checkRateLimit, 
+    buildResponse 
+} from './security-utils.js';
+
+export const handler = async (event) => {
+    const origin = event.headers.origin;
+    
+    // Handle CORS preflight requests
+    if (event.httpMethod === 'OPTIONS') {
+        return buildResponse(200, {}, origin);
+    }
+    
     // Only allow POST requests
     if (event.httpMethod !== 'POST') {
-        return {
-            statusCode: 405,
-            headers: {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-            },
-            body: JSON.stringify({ error: 'Method not allowed' }),
-        }
+        return buildResponse(405, { error: 'Method not allowed' }, origin);
+    }
+    
+    // Rate limiting - use IP address as identifier
+    const clientIP = event.headers['x-forwarded-for'] || 
+                     event.headers['x-real-ip'] || 
+                     'unknown';
+    
+    const rateLimit = checkRateLimit(`auth:${clientIP}`, 20); // 20 requests per 15min window
+    
+    if (!rateLimit.allowed) {
+        SecureLogger.info('Rate limit exceeded for auth function', { ip: clientIP });
+        return buildResponse(429, { 
+            error: 'Too many requests. Please try again later.',
+            retryAfter: Math.ceil((rateLimit.resetTime - Date.now()) / 1000)
+        }, origin);
     }
 
     try {
@@ -32,17 +61,10 @@ export const handler = async (event, context) => {
 
         // Validate required environment variables
         if (!TENANT_ID || !CLIENT_ID || !CLIENT_SECRET || !DATAVERSE_URL) {
-            console.error('Missing required environment variables')
-            return {
-                statusCode: 500,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                },
-                body: JSON.stringify({
-                    error: 'Server configuration error: Missing required environment variables'
-                }),
-            }
+            SecureLogger.error('Missing required environment variables');
+            return buildResponse(500, {
+                error: 'Server configuration error'
+            }, origin);
         }
 
         // Construct the token endpoint URL
@@ -69,68 +91,42 @@ export const handler = async (event, context) => {
 
         if (!response.ok) {
             const errorText = await response.text()
-            console.error('Token request failed:', response.status, errorText)
+            SecureLogger.error('Token request failed', { 
+                status: response.status,
+                // Don't log the full error text in production 
+                errorPreview: process.env.NODE_ENV === 'development' ? errorText : 'Error details hidden'
+            });
 
-            return {
-                statusCode: 401,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                },
-                body: JSON.stringify({
-                    error: 'Authentication failed',
-                    details: `Token request failed with status ${response.status}`
-                }),
-            }
+            return buildResponse(401, sanitizeError({
+                message: 'Authentication failed',
+                status: response.status
+            }), origin);
         }
 
         const tokenData = await response.json()
 
         // Validate that we received an access token
         if (!tokenData.access_token) {
-            console.error('No access token in response:', tokenData)
-            return {
-                statusCode: 401,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                },
-                body: JSON.stringify({
-                    error: 'Authentication failed',
-                    details: 'No access token received'
-                }),
-            }
+            SecureLogger.error('No access token in response');
+            return buildResponse(401, sanitizeError({
+                message: 'Authentication failed'
+            }), origin);
         }
 
-        console.log('Successfully obtained access token')
+        SecureLogger.info('Successfully obtained access token');
 
         // Return the access token (expires_in is typically 3600 seconds = 1 hour)
-        return {
-            statusCode: 200,
-            headers: {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-            },
-            body: JSON.stringify({
-                access_token: tokenData.access_token,
-                expires_in: tokenData.expires_in,
-                token_type: tokenData.token_type || 'Bearer'
-            }),
-        }
+        return buildResponse(200, {
+            access_token: tokenData.access_token,
+            expires_in: tokenData.expires_in,
+            token_type: tokenData.token_type || 'Bearer'
+        }, origin);
 
     } catch (error) {
-        console.error('Auth function error:', error)
+        SecureLogger.error('Auth function error', { message: error.message });
 
-        return {
-            statusCode: 500,
-            headers: {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-            },
-            body: JSON.stringify({
-                error: 'Internal server error',
-                details: error.message
-            }),
-        }
+        return buildResponse(500, sanitizeError({
+            message: 'Internal server error'
+        }), origin);
     }
 }
