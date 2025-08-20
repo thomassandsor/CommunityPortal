@@ -40,96 +40,235 @@ A modern, open-source starter template for building community portals that conne
 └── README.md          # This file
 ```
 
-## 🚀 Quick Start
+## 🚀 Getting Started
 
-### 1. Clone and Install
+Follow this step-by-step guide to create your own Community Portal:
 
-```bash
-git clone <your-repo-url>
-cd CommunityPortal
-npm install
-```
+### Step 1: Set Up Microsoft Dataverse Environment
 
-### 2. Set Up Environment Variables
+1. **Get a Dataverse Environment**:
+   - Go to [Power Platform Admin Center](https://admin.powerplatform.microsoft.com)
+   - Create a new environment or use an existing one
+   - Note your environment URL (e.g., `https://yourorg.crm.dynamics.com`)
 
-Copy `.env.example` to `.env` and fill in your values:
+2. **Ensure Contact Table is Available**:
+   - The Contact table is available by default in Dataverse
+   - No additional setup needed for this starter project
 
-```bash
-cp .env.example .env
-```
+### Step 2: Create Azure App Registration (Service Principal)
 
-Edit `.env` with your configuration:
+1. **Create App Registration**:
+   - Go to [Azure Portal](https://portal.azure.com) → **App registrations** → **New registration**
+   - Name: `Community Portal Service Principal`
+   - Supported account types: `Single tenant`
+   - Redirect URI: Leave blank (not needed for Service Principal)
+   - Click **Register**
 
-```env
-# Azure AD / Dataverse
-TENANT_ID=your-azure-tenant-id
-CLIENT_ID=your-app-registration-client-id
-CLIENT_SECRET=your-app-registration-client-secret
-DATAVERSE_URL=https://yourorg.crm.dynamics.com
+2. **Copy Important Values**:
+   - **Application (client) ID** → Save as `CLIENT_ID`
+   - **Directory (tenant) ID** → Save as `TENANT_ID`
 
-# Clerk Authentication
-VITE_CLERK_PUBLISHABLE_KEY=your-clerk-publishable-key
-CLERK_SECRET_KEY=your-clerk-secret-key
-```
+3. **Create Client Secret**:
+   - Go to **Certificates & secrets** → **Client secrets** → **New client secret**
+   - Description: `Community Portal Secret`
+   - Expires: Choose appropriate duration
+   - **Copy the secret VALUE immediately** → Save as `CLIENT_SECRET`
+   - ⚠️ You cannot see this value again after leaving the page
 
-### 3. Run Locally
-
-```bash
-npm run netlify:dev
-```
-
-Visit `http://localhost:8888` to see your portal!
-
-## ⚙️ Setup Guide
-
-### Step 1: Create Azure App Registration
-
-1. Go to [Azure Portal](https://portal.azure.com) → **App registrations** → **New registration**
-2. Set name: `Community Portal Service Principal`
-3. Set redirect URI: `Single-page application` → `http://localhost:8888` (for dev)
-4. Click **Register**
-
-**After creation:**
-- Copy the **Application (client) ID** → use as `CLIENT_ID`
-- Copy the **Directory (tenant) ID** → use as `TENANT_ID`
-- Go to **Certificates & secrets** → **New client secret** → copy value → use as `CLIENT_SECRET`
-
-### Step 2: Configure API Permissions
-
-1. In your App Registration, go to **API permissions**
-2. Click **Add a permission** → **Dynamics CRM** → **Delegated permissions**
-3. Check **user_impersonation**
-4. Click **Add permissions**
-5. Click **Grant admin consent** (requires admin)
+4. **Add API Permissions**:
+   - Go to **API permissions** → **Add a permission**
+   - Select **Dynamics CRM** → **Delegated permissions**
+   - Check **user_impersonation**
+   - Click **Add permissions**
+   - Click **Grant admin consent for [Your Tenant]** (requires admin rights)
 
 ### Step 3: Create Application User in Dataverse
 
-1. Go to [Power Platform Admin Center](https://admin.powerplatform.microsoft.com)
-2. Select your environment → **Settings** → **Users + permissions** → **Application users**
-3. Click **New app user**
-4. Click **Add an app** → select your App Registration
-5. Select **Business unit** and **Security roles** (e.g., "Basic User" + custom role with Contact permissions)
-6. Click **Create**
+1. **Access Power Platform Admin Center**:
+   - Go to [Power Platform Admin Center](https://admin.powerplatform.microsoft.com)
+   - Select your environment
+
+2. **Create Application User**:
+   - Go to **Settings** → **Users + permissions** → **Application users**
+   - Click **+ New app user**
+   - Click **+ Add an app** → Select your App Registration from Step 2
+   - **Business unit**: Select your business unit
+   - **Security roles**: Assign appropriate roles:
+     - Basic User (required)
+     - Add custom role with Contact read/write permissions, or
+     - System Administrator (for testing - not recommended for production)
+
+3. **Verify Setup**:
+   - The application user should now appear in the list
+   - Note the **Application ID** matches your `CLIENT_ID`
 
 ### Step 4: Set Up Clerk Authentication
 
-1. Go to [Clerk Dashboard](https://dashboard.clerk.com)
-2. Create a new application
-3. Enable desired social providers (Google, Microsoft, etc.)
-4. Copy **Publishable key** → use as `VITE_CLERK_PUBLISHABLE_KEY`
-5. Copy **Secret key** → use as `CLERK_SECRET_KEY`
+1. **Create Clerk Application**:
+   - Go to [Clerk Dashboard](https://dashboard.clerk.com)
+   - Click **Add application**
+   - Choose your application name: `Community Portal`
+   - Select sign-in options (Email, Google, Microsoft, etc.)
+   - Click **Create application**
 
-### Step 5: Deploy to Netlify
+2. **Configure Authentication Methods**:
+   - Enable desired social providers
+   - For Microsoft work accounts: Add Microsoft as a social provider
+   - Configure redirect URLs if needed
 
-#### Option A: Deploy to Netlify Button
-[![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg)](https://app.netlify.com/start/deploy?repository=https://github.com/yourusername/community-portal)
+3. **Copy API Keys**:
+   - From the Clerk dashboard, copy:
+   - **Publishable key** → Save as `VITE_CLERK_PUBLISHABLE_KEY`
+   - **Secret key** → Save as `CLERK_SECRET_KEY`
 
-#### Option B: Manual Deployment
-1. Build the project: `npm run build`
-2. Connect your GitHub repo to Netlify
-3. Set build command: `npm run build`
-4. Set publish directory: `dist`
-5. Add environment variables in Netlify dashboard
+### Step 5: Fork and Deploy the Project
+
+1. **Fork the Repository**:
+   - Go to [Community Portal GitHub](https://github.com/thomassandsor/CommunityPortal)
+   - Click **Fork** to create your own copy
+
+2. **Deploy to Netlify**:
+   - Go to [Netlify](https://app.netlify.com)
+   - Click **Add new site** → **Import an existing project**
+   - Connect to GitHub and select your forked repository
+   - **Build settings**:
+     - Build command: `npm run build`
+     - Publish directory: `dist`
+     - Functions directory: `functions`
+   - Click **Deploy site**
+
+### Step 6: Configure Environment Variables in Netlify
+
+1. **Access Site Settings**:
+   - In your Netlify dashboard, go to your site
+   - Click **Site settings** → **Environment variables**
+
+2. **Add All Environment Variables**:
+   ```
+   TENANT_ID = [your-azure-tenant-id]
+   CLIENT_ID = [your-app-registration-client-id]
+   CLIENT_SECRET = [your-app-registration-client-secret]
+   DATAVERSE_URL = [https://yourorg.crm.dynamics.com]
+   VITE_CLERK_PUBLISHABLE_KEY = [pk_live_your-clerk-key]
+   CLERK_SECRET_KEY = [sk_live_your-clerk-secret]
+   ```
+
+3. **Redeploy**:
+   - Go to **Deploys** tab → **Trigger deploy** → **Deploy site**
+   - Wait for build to complete
+
+### Step 7: Set Up Local Development (Netlify CLI)
+
+For secure local testing with real environment variables:
+
+1. **Install Netlify CLI**:
+   ```bash
+   npm install -g netlify-cli
+   ```
+
+2. **Login to Netlify**:
+   ```bash
+   netlify login
+   ```
+   This will open your browser to authenticate with Netlify.
+
+3. **Link Your Local Project**:
+   ```bash
+   netlify link
+   ```
+   Select your Community Portal site from the list.
+
+4. **Run Locally with Real Environment Variables**:
+   ```bash
+   netlify dev
+   ```
+   This runs your site at `http://localhost:8888` with access to your Netlify environment variables.
+
+**Benefits of Netlify CLI:**
+- ✅ **Real credentials** - Uses your actual Netlify environment variables
+- ✅ **Production parity** - Exact same environment as deployed site
+- ✅ **Secure** - No need for local `.env` files with secrets
+- ✅ **Functions work** - Test Netlify Functions locally
+- ✅ **Clean codebase** - No development workarounds needed
+
+### Step 8: Test Your Portal
+
+1. **Visit Your Site** (Production):
+   - Your Netlify site will have a URL like: `https://amazing-name-123456.netlify.app`
+
+2. **Visit Your Site** (Local Development):
+   - After running `netlify dev`: `http://localhost:8888`
+
+3. **Test Authentication**:
+   - Click sign in
+   - Use one of the configured authentication methods
+   - You should be redirected to the contact management page
+
+4. **Test Contact Management**:
+   - The system will automatically create or find your contact in Dataverse
+   - Try updating your information and saving
+
+## 🔧 Development Workflow
+
+### **For Regular Development:**
+```bash
+# Clone your fork
+git clone https://github.com/yourusername/CommunityPortal.git
+cd CommunityPortal
+
+# Install dependencies
+npm install
+
+# Set up Netlify CLI (one-time setup)
+npm install -g netlify-cli
+netlify login
+netlify link
+
+# Run locally with production environment
+netlify dev
+```
+
+### **For UI-Only Development:**
+If you only need to test UI changes without authentication:
+```bash
+# Standard Vite development (no environment variables)
+npm run dev
+# Visit http://localhost:5173
+# Note: Authentication will fail, but UI/styling can be tested
+```
+
+### **Build Testing:**
+```bash
+# Test production build
+npm run build
+npm run preview
+```
+
+## ⚙️ Detailed Configuration Reference
+
+The Getting Started section above provides the complete setup process. This section provides additional technical details for advanced users.
+
+### Azure App Registration Details
+
+The Service Principal approach provides several benefits:
+- **Security**: No user credentials exposed in application code
+- **Scalability**: Single service account handles all operations  
+- **Compliance**: Easier to audit and manage permissions
+- **Production-Ready**: Microsoft's recommended approach for server-to-server authentication
+
+### Dataverse Security Roles
+
+For production deployments, create a custom security role with minimal permissions:
+- **Contact Entity**: Read, Write, Create permissions
+- **User Entity**: Read permission (for application user)
+- **System Jobs**: Read permission (for monitoring)
+
+### Clerk Configuration Tips
+
+- **Work Accounts**: Enable Microsoft social provider for seamless work account login
+- **Personal Accounts**: Enable Google, GitHub, or other providers as needed
+- **Multi-factor**: Consider enabling MFA for production applications
+- **Webhooks**: Configure webhooks for user lifecycle events if needed
 
 ## 🔧 How It Works
 
@@ -213,21 +352,80 @@ npm run lint
 4. Push to the branch: `git push origin feature/amazing-feature`
 5. Open a Pull Request
 
-## 📝 Common Issues
+## � Troubleshooting
 
-### "Failed to obtain access token"
-- Check that your App Registration has correct API permissions
-- Verify that admin consent has been granted
-- Ensure CLIENT_ID, CLIENT_SECRET, and TENANT_ID are correct
+### Build Issues
 
-### "Contact not found" errors
-- Verify your Application User has read/write permissions on Contact table
-- Check that DATAVERSE_URL is correct and accessible
-- Ensure your environment is not in Administration mode
+**"Failed to load PostCSS config"**
+- Make sure `postcss.config.cjs` exists (not `.js`)
+- Run `npm install` to ensure dependencies are installed
 
-### CORS errors
-- Functions include proper CORS headers
-- If issues persist, check Netlify function logs
+**"Missing environment variables"**
+- Verify all required environment variables are set in Netlify
+- Check variable names exactly match (case-sensitive)
+- Redeploy after adding environment variables
+
+### Authentication Issues
+
+**"Failed to obtain access token"**
+- **Check App Registration**:
+  - Verify CLIENT_ID, CLIENT_SECRET, and TENANT_ID are correct
+  - Ensure API permissions include "Dynamics CRM → user_impersonation"
+  - Confirm admin consent has been granted
+- **Check Application User**:
+  - Verify application user exists in your Dataverse environment
+  - Ensure correct security roles are assigned
+  - Application ID should match your CLIENT_ID
+
+**"Contact not found" or permission errors**
+- **Security Roles**: Ensure application user has read/write access to Contact table
+- **Environment**: Verify DATAVERSE_URL points to correct environment
+- **Environment Mode**: Check if environment is in Administration mode (restricts access)
+
+**Clerk authentication not working**
+- Verify VITE_CLERK_PUBLISHABLE_KEY is correct and starts with `pk_`
+- Check CLERK_SECRET_KEY is correct and starts with `sk_`
+- Ensure allowed origins are configured in Clerk dashboard
+
+### Deployment Issues
+
+**Netlify build failing**
+- Check build logs for specific error messages
+- Verify all environment variables are set
+- Ensure build command is `npm run build`
+- Confirm publish directory is `dist`
+
+**Functions not working**
+- Verify functions directory is set to `functions` in Netlify
+- Check function logs in Netlify dashboard
+- Ensure environment variables are available to functions
+
+### Network Issues
+
+**CORS errors**
+- Functions include proper CORS headers (should work by default)
+- Check browser developer tools for specific CORS errors
+- Verify requests are going to correct function URLs
+
+**API timeouts**
+- Dataverse requests may timeout with large datasets
+- Check Dataverse environment health
+- Verify network connectivity between Netlify and Dataverse
+
+### Data Issues
+
+**Contact creation failing**
+- Check that email format is valid
+- Verify required fields are provided
+- Ensure application user has create permissions on Contact table
+- Check for any validation rules on Contact entity in Dataverse
+
+## 📞 Getting Help
+
+- **GitHub Issues**: [Create an issue](../../issues) for bugs or feature requests
+- **Discussions**: [Join discussions](../../discussions) for community help
+- **Documentation**: Review [Microsoft Dataverse docs](https://docs.microsoft.com/power-apps/developer/data-platform/)
+- **Clerk Support**: Check [Clerk documentation](https://clerk.com/docs)
 
 ## 🤖 AI-Assisted Development
 

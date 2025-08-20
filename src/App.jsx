@@ -1,38 +1,45 @@
 import { Routes, Route } from 'react-router-dom'
-import { SignedIn, SignedOut, UserButton } from '@clerk/clerk-react'
-import Login from './pages/Login'
+import { SignedIn, SignedOut, RedirectToSignIn } from '@clerk/clerk-react'
+import Landing from './pages/Landing'
+import Welcome from './pages/Welcome'
 import MyPage from './pages/MyPage'
+import Success from './pages/Success'
 
 function App() {
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white shadow-sm border-b">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center py-4">
-            <h1 className="text-xl font-semibold text-gray-900">
-              Community Portal
-            </h1>
+      <Routes>
+        {/* Public route - Landing page */}
+        <Route path="/" element={
+          <>
+            <SignedOut>
+              <Landing />
+            </SignedOut>
             <SignedIn>
-              <UserButton />
+              <Welcome />
             </SignedIn>
-          </div>
-        </div>
-      </header>
-
-      {/* Main Content */}
-      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <SignedOut>
-          <Login />
-        </SignedOut>
+          </>
+        } />
         
-        <SignedIn>
-          <Routes>
-            <Route path="/" element={<MyPage />} />
-            <Route path="/my-page" element={<MyPage />} />
-          </Routes>
-        </SignedIn>
-      </main>
+        {/* Protected routes */}
+        <Route path="/welcome" element={
+          <SignedIn>
+            <Welcome />
+          </SignedIn>
+        } />
+        
+        <Route path="/profile" element={
+          <SignedIn>
+            <MyPage />
+          </SignedIn>
+        } />
+        
+        <Route path="/success" element={
+          <SignedIn>
+            <Success />
+          </SignedIn>
+        } />
+      </Routes>
     </div>
   )
 }
