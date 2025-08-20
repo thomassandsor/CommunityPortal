@@ -1,89 +1,34 @@
 ```chatmode
 ---
-description: 'Community Portal Development Mode - Specialized for React + Dataverse integration with strict architectural constraints'
+description: 'Community Portal Development Mode - Uses consolidated documentation in CHAT_MODE_INSTRUCTIONS.md'
 tools: []
 ---
 
 # Community Portal Development Mode
 
+🚨 **IMPORTANT**: This chatmode now references consolidated documentation. 
+
+**Please read the complete instructions from: `CHAT_MODE_INSTRUCTIONS.md` (in project root)**
+
 You are working on the **Community Portal** - an open-source React application demonstrating secure integration between Netlify, Clerk authentication, and Microsoft Dataverse using Service Principal authentication.
 
-## REQUIRED Tech Stack (NON-NEGOTIABLE)
-- **Frontend**: React 18 + Vite + Tailwind CSS ONLY
-- **Authentication**: Clerk.dev (work + personal accounts)
-- **Backend**: Netlify Functions (serverless ONLY)
-- **Database**: Microsoft Dataverse (Service Principal auth ONLY)
-- **Hosting**: Netlify (free tier compatible)
-- **Styling**: Tailwind CSS ONLY (no other frameworks)
+All technical specifications, patterns, forbidden actions, and development guidelines are now maintained in the main `CHAT_MODE_INSTRUCTIONS.md` file.
 
-## Project Structure (MUST MAINTAIN)
+## Quick Reference - Full Details in CHAT_MODE_INSTRUCTIONS.md
+**Tech Stack**: React 18 + Vite + Tailwind CSS + Clerk.dev + Netlify Functions + Microsoft Dataverse
+
+**Key Rules**:
+- ✅ ES Modules in functions (`export const handler`)
+- ✅ Use Netlify CLI for local development (never .env files)
+- ✅ ContactChecker pattern for auto contact management
+- ✅ Email fields locked as unique identifiers
+- ✅ Use `mobilephone` not `telephone1`
+- ❌ Never create fake .env files
+- ❌ Never use CommonJS in functions
+- ❌ Never auto-redirect without user consent
+
+**For complete patterns, forbidden actions, project structure, and development guidelines, see:**
+👉 **`CHAT_MODE_INSTRUCTIONS.md`** 👈
+
 ```
-/functions/           # Netlify Functions only
-  auth.js            # Service Principal authentication
-  contact.js         # Contact CRUD operations
-/src/
-  /components/       # Reusable React components (.jsx)
-  /pages/           # Route components (.jsx)
-  main.jsx          # ClerkProvider setup
-  App.jsx           # Router + auth logic
-```
-
-## Authentication Pattern (REQUIRED)
-- **User Auth**: Clerk.dev components (`<SignIn>`, `<UserButton>`, `<SignedIn>`, `<SignedOut>`)
-- **Dataverse Auth**: Service Principal (Client Credentials Flow) - NEVER delegated user auth
-- **Security**: Environment variables for secrets, NEVER in frontend
-
-## FORBIDDEN Actions
-❌ Alternative frameworks (Next.js, Vue, Angular)
-❌ Other CSS frameworks (Bootstrap, Material-UI)
-❌ Delegated user authentication to Dataverse
-❌ Storing secrets in frontend code
-❌ Alternative hosting solutions
-❌ Breaking established file structure
-❌ Class components (hooks only)
-❌ Alternative databases to Dataverse
-
-## Code Patterns to Follow
-
-### Netlify Functions Pattern
-```javascript
-exports.handler = async (event, context) => {
-  if (event.httpMethod === 'OPTIONS') { /* CORS */ }
-  const accessToken = await getAccessToken()
-  // Handle GET/POST with proper error handling
-}
-```
-
-### React Component Pattern
-```javascript
-import { useState, useEffect } from 'react'
-import { useUser } from '@clerk/clerk-react'
-
-function ComponentName({ props }) {
-  const { user, isLoaded } = useUser()
-  const [data, setData] = useState(null)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
-  // Tailwind CSS styling only
-}
-```
-
-## AI Assistant Behavior
-- **ALWAYS** maintain established architecture
-- **ALWAYS** use existing tech stack
-- **ALWAYS** follow file naming conventions (.jsx for React)
-- **ALWAYS** include proper error handling
-- **ALWAYS** use Tailwind for styling
-- When asked for alternatives: acknowledge but explain constraints
-- When extending: follow established patterns exactly
-- Prioritize consistency and community learning value
-
-## Extension Guidelines
-1. New tables: Create `functions/[tablename].js` following contact.js pattern
-2. New components: Follow ContactForm.jsx pattern
-3. New pages: Follow MyPage.jsx pattern
-4. Update README.md for new functionality
-5. Maintain modular, AI-friendly code structure
-
-Remember: This is a teaching tool for community learning and AI-assisted development.
 ```
