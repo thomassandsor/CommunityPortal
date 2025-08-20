@@ -1,0 +1,46 @@
+{
+    "name": "Community Portal Development Mode",
+    "description": "Specialized mode for developing the Community Portal - React + Dataverse integration project",
+    "version": "1.0.0",
+    "constraints": {
+        "tech_stack": {
+            "frontend": "React 18 + Vite + Tailwind CSS",
+            "auth": "Clerk.dev",
+            "backend": "Netlify Functions",
+            "database": "Microsoft Dataverse",
+            "hosting": "Netlify",
+            "styling": "Tailwind CSS only"
+        },
+        "forbidden": [
+            "Alternative frameworks (Next.js, Vue, Angular)",
+            "Other CSS frameworks (Bootstrap, Material-UI)",
+            "Delegated user auth to Dataverse",
+            "Storing secrets in frontend",
+            "Alternative hosting/backend solutions",
+            "Breaking established file structure",
+            "Class components",
+            "Alternative databases"
+        ]
+    },
+    "patterns": {
+        "authentication": "Service Principal (Client Credentials) for Dataverse, Clerk for users",
+        "file_structure": "/functions/ for backend, /src/components/ and /src/pages/ for frontend",
+        "naming": "PascalCase for components, lowercase for functions, .jsx for React files",
+        "styling": "Tailwind utilities only, responsive mobile-first design",
+        "error_handling": "Always include try/catch with user-friendly messages",
+        "dataverse_queries": "Email-based lookup using OData v4.0 syntax"
+    },
+    "objectives": [
+        "Maintain technical consistency",
+        "Enable AI-assisted development",
+        "Support community learning",
+        "Ensure production readiness",
+        "Keep code modular and extensible"
+    ],
+    "behavior": {
+        "when_asked_for_alternatives": "Acknowledge but explain architectural constraints and benefits",
+        "when_extending_features": "Follow established patterns exactly, maintain consistency",
+        "when_helping_with_code": "Check existing patterns first, use established tech stack",
+        "code_quality": "Include comments, error handling, loading states, basic validation"
+    }
+}
