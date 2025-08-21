@@ -27,14 +27,14 @@ function validateEmail(email) {
 
 function validateContactData(data) {
     const errors = []
-    
+
     // Required fields
     if (!data.emailaddress1?.trim()) {
         errors.push('Email address is required')
     } else if (!validateEmail(data.emailaddress1)) {
         errors.push('Invalid email format')
     }
-    
+
     // Length limits (Dataverse field constraints)
     if (data.firstname && data.firstname.length > 50) {
         errors.push('First name cannot exceed 50 characters')
@@ -45,15 +45,15 @@ function validateContactData(data) {
     if (data.mobilephone && data.mobilephone.length > 50) {
         errors.push('Mobile phone cannot exceed 50 characters')
     }
-    
+
     // Sanitize HTML/script content
     const dangerousPattern = /<script|<iframe|javascript:|data:/i
-    if (dangerousPattern.test(data.firstname || '') || 
-        dangerousPattern.test(data.lastname || '') || 
+    if (dangerousPattern.test(data.firstname || '') ||
+        dangerousPattern.test(data.lastname || '') ||
         dangerousPattern.test(data.mobilephone || '')) {
         errors.push('Invalid characters detected in input')
     }
-    
+
     return errors
 }
 
@@ -62,12 +62,12 @@ function buildSecureODataFilter(email) {
     if (!validateEmail(email)) {
         throw new Error('Invalid email format for filter')
     }
-    
+
     // Proper OData escaping - escape quotes and percent signs
     const escapedEmail = email
         .replace(/'/g, "''")    // Escape single quotes
         .replace(/%/g, '%25')   // Escape percent signs
-    
+
     return `emailaddress1 eq '${escapedEmail}'`
 }
 
@@ -75,19 +75,19 @@ function checkRateLimit(clientIP) {
     const now = Date.now()
     const windowMs = 60 * 1000 // 1 minute
     const maxRequests = 30 // 30 requests per minute per IP
-    
+
     if (!clientIP) clientIP = 'unknown'
-    
+
     const userRequests = rateLimits.get(clientIP) || []
     const recentRequests = userRequests.filter(time => now - time < windowMs)
-    
+
     if (recentRequests.length >= maxRequests) {
         throw new Error('Rate limit exceeded. Please try again later.')
     }
-    
+
     // Clean up old entries
     rateLimits.set(clientIP, [...recentRequests, now])
-    
+
     // Cleanup old IPs periodically
     if (rateLimits.size > 1000) {
         const cutoff = now - windowMs
@@ -131,10 +131,10 @@ export const handler = async (event, context) => {
         }
 
         // Security: Rate limiting
-        const clientIP = event.headers['x-forwarded-for']?.split(',')[0] || 
-                        event.headers['x-real-ip'] || 
-                        'unknown'
-        
+        const clientIP = event.headers['x-forwarded-for']?.split(',')[0] ||
+            event.headers['x-real-ip'] ||
+            'unknown'
+
         try {
             checkRateLimit(clientIP)
         } catch (rateLimitError) {
@@ -283,9 +283,9 @@ export const handler = async (event, context) => {
                         'Content-Type': 'application/json',
                         'Access-Control-Allow-Origin': '*',
                     },
-                    body: JSON.stringify({ 
-                        error: 'Validation failed', 
-                        details: validationErrors 
+                    body: JSON.stringify({
+                        error: 'Validation failed',
+                        details: validationErrors
                     }),
                 }
             }

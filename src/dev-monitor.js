@@ -13,43 +13,43 @@ if (import.meta.env.DEV) {
 
     // Monitor for connection losses
     const originalFetch = window.fetch
-    window.fetch = async function(...args) {
+    window.fetch = async function (...args) {
         try {
             const response = await originalFetch.apply(this, args)
-            
+
             // Reset connection status on successful request
             if (response.ok && connectionLost) {
                 connectionLost = false
                 reconnectAttempts = 0
                 console.log('🔄 Development server reconnected')
             }
-            
+
             return response
         } catch (error) {
             // Check if this is a localhost connection error
             if (error.message.includes('localhost') || error.message.includes('ERR_CONNECTION_REFUSED')) {
                 reconnectAttempts++
-                
+
                 if (!connectionLost) {
                     connectionLost = true
                     console.log('🔌 Development server disconnected')
                 }
-                
+
                 // After max attempts, show user-friendly message
                 if (reconnectAttempts >= maxReconnectAttempts) {
                     console.log('⚠️ Development server appears to be stopped')
                     console.log('💡 Close this browser tab to stop reconnection attempts')
-                    
+
                     // Stop further reconnection attempts by disabling HMR
                     if (window.__vite_plugin_react_preamble_installed__) {
                         // Disable Vite HMR reconnection
                         if (import.meta.hot) {
-                            import.meta.hot.dispose(() => {})
+                            import.meta.hot.dispose(() => { })
                         }
                     }
                 }
             }
-            
+
             throw error
         }
     }
@@ -58,7 +58,7 @@ if (import.meta.env.DEV) {
     document.addEventListener('visibilitychange', () => {
         if (document.visibilityState === 'visible' && connectionLost) {
             console.log('🔍 Page visible again, checking server status...')
-            
+
             // Test if server is back online
             fetch('/.netlify/functions/contact?test=1')
                 .then(() => {

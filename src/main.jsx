@@ -20,19 +20,25 @@ if (!PUBLISHABLE_KEY) {
 // Development mode optimization to reduce unnecessary re-renders
 const isDevelopment = import.meta.env.DEV
 
+// React Router future flags to suppress v7 warnings
+const routerFutureFlags = {
+    v7_startTransition: true,
+    v7_relativeSplatPath: true
+}
+
 ReactDOM.createRoot(document.getElementById('root')).render(
     // Only use StrictMode in development for debugging
     isDevelopment ? (
         <React.StrictMode>
             <ClerkProvider publishableKey={PUBLISHABLE_KEY}>
-                <BrowserRouter>
+                <BrowserRouter future={routerFutureFlags}>
                     <App />
                 </BrowserRouter>
             </ClerkProvider>
         </React.StrictMode>
     ) : (
         <ClerkProvider publishableKey={PUBLISHABLE_KEY}>
-            <BrowserRouter>
+            <BrowserRouter future={routerFutureFlags}>
                 <App />
             </BrowserRouter>
         </ClerkProvider>

@@ -13,7 +13,7 @@ function ContactForm({ contact, userEmail, onSave, disabled }) {
     // Validation helper functions
     const validateField = (name, value) => {
         const newErrors = { ...errors }
-        
+
         switch (name) {
             case 'firstname':
                 if (value && value.length > 50) {
@@ -55,7 +55,7 @@ function ContactForm({ contact, userEmail, onSave, disabled }) {
                 }
                 break
         }
-        
+
         setErrors(newErrors)
         return Object.keys(newErrors).length === 0
     }    // Initialize form data when contact changes
@@ -80,15 +80,15 @@ function ContactForm({ contact, userEmail, onSave, disabled }) {
 
     const handleChange = (e) => {
         const { name, value } = e.target
-        
+
         // Security: Sanitize input to prevent XSS
         const sanitizedValue = value.replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-        
+
         setFormData(prev => ({
             ...prev,
             [name]: sanitizedValue
         }))
-        
+
         // Real-time validation
         validateField(name, sanitizedValue)
     }
@@ -99,7 +99,7 @@ function ContactForm({ contact, userEmail, onSave, disabled }) {
 
         try {
             // Validate all fields before submission
-            const allFieldsValid = Object.keys(formData).every(field => 
+            const allFieldsValid = Object.keys(formData).every(field =>
                 validateField(field, formData[field])
             )
 

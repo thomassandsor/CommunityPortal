@@ -61,11 +61,11 @@ export const handler = async (event, context) => {
         const currentScope = `${DATAVERSE_URL}/.default`
 
         // Check if we have a valid cached token
-        if (tokenCache.token && 
-            tokenCache.expiry && 
-            tokenCache.expiry > Date.now() && 
+        if (tokenCache.token &&
+            tokenCache.expiry &&
+            tokenCache.expiry > Date.now() &&
             tokenCache.scope === currentScope) {
-            
+
             console.log('Returning cached access token')
             return {
                 statusCode: 200,

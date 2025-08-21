@@ -22,7 +22,11 @@ export default defineConfig({
             usePolling: false,
             // Ignore node_modules to improve performance
             ignored: ['**/node_modules/**', '**/dist/**', '**/.git/**']
-        }
+        },
+        // Better port handling
+        port: 5173,
+        strictPort: false,  // Allow Vite to try other ports if 5173 is busy
+        host: '127.0.0.1'   // Explicitly bind to localhost
     },
     // Optimize for development
     esbuild: {

@@ -48,41 +48,41 @@ function showInstructions() {
 
 async function startDevelopment() {
     showBanner()
-    
+
     // Check if netlify.toml exists
     if (!existsSync('./netlify.toml')) {
         log('red', '❌ Error: netlify.toml not found')
         log('yellow', 'Make sure you\'re in the project root directory')
         process.exit(1)
     }
-    
+
     log('yellow', '🚀 Starting Netlify development server...\n')
-    
+
     // Start netlify dev with proper signal handling
     const netlifyDev = spawn('netlify', ['dev'], {
         stdio: 'inherit',
         shell: true
     })
-    
+
     // Handle graceful shutdown
     process.on('SIGINT', () => {
         log('yellow', '\n🛑 Stopping development server...')
         log('reset', '   Closing browser tabs to prevent reconnection errors...')
-        
+
         netlifyDev.kill('SIGINT')
-        
+
         setTimeout(() => {
             log('green', '✅ Development server stopped cleanly')
             log('blue', '💡 Tip: Your browser tabs should now stop trying to reconnect')
             process.exit(0)
         }, 1000)
     })
-    
+
     netlifyDev.on('error', (err) => {
         log('red', `❌ Error starting development server: ${err.message}`)
         process.exit(1)
     })
-    
+
     netlifyDev.on('close', (code) => {
         if (code === 0) {
             log('green', '✅ Development server closed successfully')
@@ -91,7 +91,7 @@ async function startDevelopment() {
         }
         process.exit(code)
     })
-    
+
     // Show instructions after a brief delay
     setTimeout(showInstructions, 3000)
 }

@@ -2,6 +2,13 @@
   functions = "functions"
   publish = "dist"
 
+[dev]
+  framework = "vite"
+  command = "npm run dev:vite"
+  targetPort = 5173      # Vite dev server (internal)
+  port = 8888           # Netlify dev proxy (what you access)
+  autoLaunch = false
+
 # Security Headers
 [[headers]]
   for = "/*"
@@ -10,7 +17,7 @@
     X-Content-Type-Options = "nosniff"
     X-XSS-Protection = "1; mode=block"
     Referrer-Policy = "strict-origin-when-cross-origin"
-    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline' https://*.clerk.accounts.dev https://*.clerk.dev; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' https://*.clerk.dev https://*.clerk.accounts.dev https://*.crm.dynamics.com"
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline' https://*.clerk.accounts.dev https://*.clerk.dev; worker-src 'self' blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: https:; connect-src 'self' ws://localhost:* wss://localhost:* https://*.clerk.dev https://*.clerk.accounts.dev https://*.crm.dynamics.com"
     Strict-Transport-Security = "max-age=31536000; includeSubDomains; preload"
     Permissions-Policy = "geolocation=(), microphone=(), camera=(), payment=(), usb=(), magnetometer=(), gyroscope=()"
 
