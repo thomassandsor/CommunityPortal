@@ -5,6 +5,11 @@ import { BrowserRouter } from 'react-router-dom'
 import App from './App.jsx'
 import './index.css'
 
+// Development connection monitoring
+if (import.meta.env.DEV) {
+    import('./dev-monitor.js')
+}
+
 // Import Clerk publishable key
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
 
@@ -12,12 +17,24 @@ if (!PUBLISHABLE_KEY) {
     throw new Error("Missing Publishable Key")
 }
 
+// Development mode optimization to reduce unnecessary re-renders
+const isDevelopment = import.meta.env.DEV
+
 ReactDOM.createRoot(document.getElementById('root')).render(
-    <React.StrictMode>
+    // Only use StrictMode in development for debugging
+    isDevelopment ? (
+        <React.StrictMode>
+            <ClerkProvider publishableKey={PUBLISHABLE_KEY}>
+                <BrowserRouter>
+                    <App />
+                </BrowserRouter>
+            </ClerkProvider>
+        </React.StrictMode>
+    ) : (
         <ClerkProvider publishableKey={PUBLISHABLE_KEY}>
             <BrowserRouter>
                 <App />
             </BrowserRouter>
         </ClerkProvider>
-    </React.StrictMode>,
+    )
 )
