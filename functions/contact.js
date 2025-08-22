@@ -10,11 +10,14 @@
  * Implements email-based contact matching and creation logic.
  * 
  * SECURITY FEATURES:
+ * - User authentication and authorization
  * - Input validation and sanitization
  * - Rate limiting protection
  * - Secure OData query building
  * - Request size limits
  */
+
+import { validateUser, createAuthErrorResponse, createSuccessResponse, sanitizeEmail, buildSecureEmailFilter } from './auth-utils.js'
 
 // Rate limiting storage (in production, use Redis or similar)
 const rateLimits = new Map()
@@ -25,7 +28,7 @@ function validateEmail(email) {
     return emailRegex.test(email) && email.length <= 254
 }
 
-function validateContactData(data) {
+function validateContactData(data, authenticatedEmail) {
     const errors = []
 
     // Required fields
@@ -33,6 +36,9 @@ function validateContactData(data) {
         errors.push('Email address is required')
     } else if (!validateEmail(data.emailaddress1)) {
         errors.push('Invalid email format')
+    } else if (data.emailaddress1.toLowerCase() !== authenticatedEmail.toLowerCase()) {
+        // SECURITY: Ensure user can only create/update their own contact
+        errors.push('Email address must match your authenticated account')
     }
 
     // Length limits (Dataverse field constraints)
@@ -57,28 +63,12 @@ function validateContactData(data) {
     return errors
 }
 
-function buildSecureODataFilter(email) {
-    // Validate email first
-    if (!validateEmail(email)) {
-        throw new Error('Invalid email format for filter')
-    }
-
-    // Proper OData escaping - escape quotes and percent signs
-    const escapedEmail = email
-        .replace(/'/g, "''")    // Escape single quotes
-        .replace(/%/g, '%25')   // Escape percent signs
-
-    return `emailaddress1 eq '${escapedEmail}'`
-}
-
-function checkRateLimit(clientIP) {
+function checkRateLimit(userEmail) {
     const now = Date.now()
     const windowMs = 60 * 1000 // 1 minute
-    const maxRequests = 30 // 30 requests per minute per IP
+    const maxRequests = 10 // 10 requests per minute per user (stricter than IP-based)
 
-    if (!clientIP) clientIP = 'unknown'
-
-    const userRequests = rateLimits.get(clientIP) || []
+    const userRequests = rateLimits.get(userEmail) || []
     const recentRequests = userRequests.filter(time => now - time < windowMs)
 
     if (recentRequests.length >= maxRequests) {
@@ -86,17 +76,17 @@ function checkRateLimit(clientIP) {
     }
 
     // Clean up old entries
-    rateLimits.set(clientIP, [...recentRequests, now])
+    rateLimits.set(userEmail, [...recentRequests, now])
 
-    // Cleanup old IPs periodically
+    // Cleanup old entries periodically
     if (rateLimits.size > 1000) {
         const cutoff = now - windowMs
-        for (const [ip, requests] of rateLimits.entries()) {
+        for (const [email, requests] of rateLimits.entries()) {
             const validRequests = requests.filter(time => time > cutoff)
             if (validRequests.length === 0) {
-                rateLimits.delete(ip)
+                rateLimits.delete(email)
             } else {
-                rateLimits.set(ip, validRequests)
+                rateLimits.set(email, validRequests)
             }
         }
     }
@@ -109,7 +99,7 @@ export const handler = async (event, context) => {
             statusCode: 200,
             headers: {
                 'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Headers': 'Content-Type',
+                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
                 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
             },
             body: '',
@@ -117,32 +107,32 @@ export const handler = async (event, context) => {
     }
 
     try {
+        // SECURITY: Validate user authentication first
+        let user
+        try {
+            user = await validateUser(event)
+        } catch (authError) {
+            return createAuthErrorResponse(authError.message)
+        }
+
+        const { userEmail, userId } = user
+
         // Security: Check request size limit (1MB)
         const maxBodySize = 1024 * 1024 // 1MB
         if (event.body && Buffer.byteLength(event.body, 'utf8') > maxBodySize) {
-            return {
-                statusCode: 413,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                },
-                body: JSON.stringify({ error: 'Request payload too large' }),
-            }
+            return createAuthErrorResponse('Request payload too large', 413)
         }
 
-        // Security: Rate limiting
-        const clientIP = event.headers['x-forwarded-for']?.split(',')[0] ||
-            event.headers['x-real-ip'] ||
-            'unknown'
-
+        // Security: Rate limiting per authenticated user
         try {
-            checkRateLimit(clientIP)
+            checkRateLimit(userEmail)
         } catch (rateLimitError) {
             return {
                 statusCode: 429,
                 headers: {
                     'Content-Type': 'application/json',
                     'Access-Control-Allow-Origin': '*',
+                    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
                     'Retry-After': '60',
                 },
                 body: JSON.stringify({ error: rateLimitError.message }),
@@ -154,62 +144,33 @@ export const handler = async (event, context) => {
 
         if (!DATAVERSE_URL) {
             console.error('Missing DATAVERSE_URL environment variable')
-            return {
-                statusCode: 500,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                },
-                body: JSON.stringify({
-                    error: 'Server configuration error: Missing DATAVERSE_URL'
-                }),
-            }
+            return createAuthErrorResponse('Server configuration error', 500)
         }
 
         // Get access token by calling our auth function
         const accessToken = await getAccessToken()
         if (!accessToken) {
-            return {
-                statusCode: 401,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                },
-                body: JSON.stringify({ error: 'Failed to obtain access token' }),
-            }
+            return createAuthErrorResponse('Failed to obtain access token', 500)
         }
 
         // Handle GET request - find contact by email
         if (event.httpMethod === 'GET') {
-            const email = event.queryStringParameters?.email
+            const requestedEmail = event.queryStringParameters?.email
 
-            if (!email) {
-                return {
-                    statusCode: 400,
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Access-Control-Allow-Origin': '*',
-                    },
-                    body: JSON.stringify({ error: 'Email parameter is required' }),
-                }
+            if (!requestedEmail) {
+                return createAuthErrorResponse('Email parameter is required', 400)
             }
 
-            // Security: Validate email format
-            if (!validateEmail(email)) {
-                return {
-                    statusCode: 400,
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Access-Control-Allow-Origin': '*',
-                    },
-                    body: JSON.stringify({ error: 'Invalid email format' }),
-                }
+            // SECURITY: Ensure user can only access their own contact data
+            if (requestedEmail.toLowerCase() !== userEmail.toLowerCase()) {
+                return createAuthErrorResponse('Access denied: Can only access your own contact', 403)
             }
 
-            console.log(`Looking up contact for email: ${email}`)
+            console.log(`Authenticated user ${userEmail} looking up their contact`)
 
-            // Security: Use secure OData filter building
-            const filter = buildSecureODataFilter(email)
+            // Security: Use secure email sanitization and filter building
+            const sanitizedEmail = sanitizeEmail(requestedEmail)
+            const filter = buildSecureEmailFilter(sanitizedEmail)
             const select = 'contactid,firstname,lastname,emailaddress1,mobilephone,createdon,modifiedon'
             const url = `${DATAVERSE_URL}/api/data/v9.0/contacts?$filter=${encodeURIComponent(filter)}&$select=${select}`
 
@@ -226,36 +187,18 @@ export const handler = async (event, context) => {
             if (!response.ok) {
                 const errorText = await response.text()
                 console.error('Dataverse GET request failed:', response.status, errorText)
-
-                return {
-                    statusCode: response.status,
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Access-Control-Allow-Origin': '*',
-                    },
-                    body: JSON.stringify({
-                        error: 'Failed to fetch contact from Dataverse',
-                        details: errorText
-                    }),
-                }
+                return createAuthErrorResponse('Failed to fetch contact from Dataverse', response.status)
             }
 
             const data = await response.json()
             const contact = data.value && data.value.length > 0 ? data.value[0] : null
 
-            console.log(`Found ${data.value?.length || 0} contacts for email: ${email}`)
+            console.log(`Found ${data.value?.length || 0} contacts for authenticated user: ${userEmail}`)
 
-            return {
-                statusCode: 200,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                },
-                body: JSON.stringify({
-                    contact,
-                    found: !!contact
-                }),
-            }
+            return createSuccessResponse({
+                contact,
+                found: !!contact
+            })
         }
 
         // Handle POST request - create or update contact
@@ -264,44 +207,29 @@ export const handler = async (event, context) => {
             try {
                 contactData = JSON.parse(event.body || '{}')
             } catch (parseError) {
-                return {
-                    statusCode: 400,
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Access-Control-Allow-Origin': '*',
-                    },
-                    body: JSON.stringify({ error: 'Invalid JSON in request body' }),
-                }
+                return createAuthErrorResponse('Invalid JSON in request body', 400)
             }
 
-            // Security: Validate all input data
-            const validationErrors = validateContactData(contactData)
+            // Security: Validate all input data with authenticated user context
+            const validationErrors = validateContactData(contactData, userEmail)
             if (validationErrors.length > 0) {
-                return {
-                    statusCode: 400,
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Access-Control-Allow-Origin': '*',
-                    },
-                    body: JSON.stringify({
-                        error: 'Validation failed',
-                        details: validationErrors
-                    }),
-                }
+                return createAuthErrorResponse(`Validation failed: ${validationErrors.join(', ')}`, 400)
             }
 
             // Prepare contact data for Dataverse (sanitized)
             const contact = {
                 firstname: (contactData.firstname || '').trim().substring(0, 50),
                 lastname: (contactData.lastname || '').trim().substring(0, 50),
-                emailaddress1: contactData.emailaddress1.trim(),
+                emailaddress1: sanitizeEmail(contactData.emailaddress1),
                 mobilephone: (contactData.mobilephone || '').trim().substring(0, 50),
             }
 
             let response
-            let result            // Update existing contact
+            let result
+
+            // Update existing contact
             if (contactData.contactid) {
-                console.log(`Updating contact: ${contactData.contactid}`)
+                console.log(`Authenticated user ${userEmail} updating contact: ${contactData.contactid}`)
 
                 const url = `${DATAVERSE_URL}/api/data/v9.0/contacts(${contactData.contactid})`
 
@@ -319,27 +247,16 @@ export const handler = async (event, context) => {
                 if (!response.ok) {
                     const errorText = await response.text()
                     console.error('Dataverse PATCH request failed:', response.status, errorText)
-
-                    return {
-                        statusCode: response.status,
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Access-Control-Allow-Origin': '*',
-                        },
-                        body: JSON.stringify({
-                            error: 'Failed to update contact in Dataverse',
-                            details: errorText
-                        }),
-                    }
+                    return createAuthErrorResponse('Failed to update contact in Dataverse', response.status)
                 }
 
                 // For PATCH requests, return the updated contact
                 result = { ...contact, contactid: contactData.contactid }
-                console.log('Contact updated successfully')
+                console.log(`Contact updated successfully for user: ${userEmail}`)
 
             } else {
                 // Create new contact
-                console.log(`Creating new contact for email: ${contact.emailaddress1}`)
+                console.log(`Authenticated user ${userEmail} creating new contact`)
 
                 const url = `${DATAVERSE_URL}/api/data/v9.0/contacts`
 
@@ -358,61 +275,25 @@ export const handler = async (event, context) => {
                 if (!response.ok) {
                     const errorText = await response.text()
                     console.error('Dataverse POST request failed:', response.status, errorText)
-
-                    return {
-                        statusCode: response.status,
-                        headers: {
-                            'Content-Type': 'application/json',
-                            'Access-Control-Allow-Origin': '*',
-                        },
-                        body: JSON.stringify({
-                            error: 'Failed to create contact in Dataverse',
-                            details: errorText
-                        }),
-                    }
+                    return createAuthErrorResponse('Failed to create contact in Dataverse', response.status)
                 }
 
                 result = await response.json()
-                console.log('Contact created successfully with ID:', result.contactid)
+                console.log(`Contact created successfully for user ${userEmail} with ID:`, result.contactid)
             }
 
-            return {
-                statusCode: 200,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                },
-                body: JSON.stringify({
-                    contact: result,
-                    created: !contactData.contactid
-                }),
-            }
+            return createSuccessResponse({
+                contact: result,
+                created: !contactData.contactid
+            })
         }
 
         // Method not allowed
-        return {
-            statusCode: 405,
-            headers: {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-            },
-            body: JSON.stringify({ error: 'Method not allowed' }),
-        }
+        return createAuthErrorResponse('Method not allowed', 405)
 
     } catch (error) {
         console.error('Contact function error:', error)
-
-        return {
-            statusCode: 500,
-            headers: {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-            },
-            body: JSON.stringify({
-                error: 'Internal server error',
-                details: error.message
-            }),
-        }
+        return createAuthErrorResponse('Internal server error', 500)
     }
 }
 

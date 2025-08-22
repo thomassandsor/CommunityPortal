@@ -102,7 +102,7 @@ function ContactChecker({ children }) {
                 console.log('Contact created successfully:', createData.contact.contactid)
 
                 // Redirect to profile page to complete information
-                navigate('/profile')
+                                    navigate('/contacts/edit')
             }
 
         } catch (error) {

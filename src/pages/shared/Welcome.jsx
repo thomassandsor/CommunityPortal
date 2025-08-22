@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useUser, UserButton } from '@clerk/clerk-react'
-import Sidebar from '../components/Sidebar'
+import Sidebar from '../../components/shared/Sidebar'
 
 function Welcome() {
     const { user } = useUser()
@@ -65,7 +65,7 @@ function Welcome() {
                                     </div>
                                 </div>
                                 <Link
-                                    to="/my-page"
+                                    to="/contacts/edit"
                                     className="inline-block bg-green-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-green-700 transition-colors"
                                 >
                                     Go to Profile →

@@ -1,10 +1,10 @@
 import { Routes, Route } from 'react-router-dom'
 import { SignedIn, SignedOut, RedirectToSignIn } from '@clerk/clerk-react'
-import ContactChecker from './components/ContactChecker'
-import Landing from './pages/Landing'
-import Welcome from './pages/Welcome'
-import MyPage from './pages/MyPage'
-import Success from './pages/Success'
+import ContactChecker from './components/shared/ContactChecker'
+import Landing from './pages/shared/Landing'
+import Welcome from './pages/shared/Welcome'
+import ContactEdit from './pages/contacts/ContactEdit'
+import Success from './pages/shared/Success'
 
 function App() {
     return (
@@ -33,9 +33,9 @@ function App() {
                     </SignedIn>
                 } />
 
-                <Route path="/profile" element={
+                <Route path="/contacts/edit" element={
                     <SignedIn>
-                        <MyPage />
+                        <ContactEdit />
                     </SignedIn>
                 } />
 
