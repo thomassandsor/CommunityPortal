@@ -75,6 +75,8 @@ export const handler = async (event) => {
 8. **Editable email fields** - Email should be locked as unique identifier
 9. **Home.jsx or unused components** - Keep component structure clean
 10. **Direct navigation bypassing ContactChecker** - All routes should go through contact management
+11. **Removing .netlify directory** - NEVER suggest deleting this directory (contains important cache and config)
+12. **Skipping Netlify link verification** - Always check `netlify status` during setup to ensure proper site linking
 
 ### FIELD NAMING REQUIREMENTS:
 - ✅ `emailaddress1` (Dataverse standard)
@@ -149,15 +151,24 @@ CommunityPortal/
 
 ### Local Development Setup:
 ```bash
-# Install dependencies
+# Step 1: Install dependencies
 npm install
 
-# Link to Netlify site (injects environment variables)
+# Step 2: CRITICAL - Verify Netlify site linking
+netlify status
+
+# Step 3: Link to Netlify site if not already linked (injects environment variables)
 netlify link
 
-# Start local development server
+# Step 4: Start local development server (DO NOT use --offline in production)
 netlify dev
 ```
+
+### Setup Verification Checklist:
+✅ **Check `netlify status`** - Ensures site is properly linked to get environment variables  
+✅ **Verify environment variables injection** - Look for "Injected project settings env vars" message  
+✅ **Confirm .netlify directory exists** - Contains important cache and configuration (NEVER delete)  
+✅ **Test function loading** - All functions should show "Loaded function [name]" messages  
 
 ### Key Development Rules:
 1. **Use Netlify CLI** - Never create fake .env files
@@ -165,6 +176,8 @@ netlify dev
 3. **ContactChecker First** - All authenticated routes go through contact management
 4. **Locked Email Fields** - Email is the unique identifier, don't allow editing
 5. **Session Storage Protection** - Prevent duplicate API calls in same session
+6. **NEVER Delete .netlify Directory** - Contains critical cache and configuration files
+7. **Always Verify Netlify Linking** - Run `netlify status` before development to ensure proper setup
 
 ## 🔌 API INTEGRATION
 

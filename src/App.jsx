@@ -5,6 +5,7 @@ import Landing from './pages/shared/Landing'
 import Welcome from './pages/shared/Welcome'
 import ContactEdit from './pages/contacts/ContactEdit'
 import Success from './pages/shared/Success'
+import Organization from './pages/organization/Organization'
 
 function App() {
     return (
@@ -36,6 +37,12 @@ function App() {
                 <Route path="/contacts/edit" element={
                     <SignedIn>
                         <ContactEdit />
+                    </SignedIn>
+                } />
+
+                <Route path="/organization" element={
+                    <SignedIn>
+                        <Organization />
                     </SignedIn>
                 } />
 

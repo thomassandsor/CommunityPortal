@@ -1,11 +1,57 @@
 import { Link, useLocation } from 'react-router-dom'
-import { useUser, UserButton } from '@clerk/clerk-react'
+import { useUser, UserButton, useAuth } from '@clerk/clerk-react'
+import { useState, useEffect } from 'react'
 
 function Sidebar() {
     const { user } = useUser()
+    const { getToken } = useAuth()
     const location = useLocation()
+    const [showOrganization, setShowOrganization] = useState(false)
 
-    const menuItems = [
+    // Check if user should see Organization menu
+    useEffect(() => {
+        const checkOrganizationAccess = async () => {
+            if (!user?.primaryEmailAddress?.emailAddress) return
+
+            try {
+                const token = await getToken()
+                const response = await fetch(`/.netlify/functions/contact?email=${encodeURIComponent(user.primaryEmailAddress.emailAddress)}`, {
+                    method: 'GET',
+                    headers: {
+                        'Authorization': `Bearer ${token}`,
+                        'Content-Type': 'application/json'
+                    }
+                })
+
+                if (response.ok) {
+                    const data = await response.json()
+                    const contact = data.contact
+                    
+                    // Debug logging
+                    console.log('Sidebar contact data:', contact)
+                    console.log('Admin status:', contact?.cp_portaladmin)
+                    console.log('Company association:', contact?._parentcustomerid_value)
+                    
+                    // Show Organization if user is admin AND has an associated account
+                    if (contact?.cp_portaladmin && contact?._parentcustomerid_value) {
+                        console.log('✅ Showing Organization menu - requirements met')
+                        setShowOrganization(true)
+                    } else {
+                        console.log('❌ Not showing Organization menu:', {
+                            isAdmin: contact?.cp_portaladmin,
+                            hasCompany: contact?._parentcustomerid_value
+                        })
+                    }
+                }
+            } catch (error) {
+                console.error('Error checking organization access:', error)
+            }
+        }
+
+        checkOrganizationAccess()
+    }, [user, getToken])
+
+    const baseMenuItems = [
         {
             id: 'home',
             name: 'Home',
@@ -27,6 +73,22 @@ function Sidebar() {
             )
         }
     ]
+
+    const organizationMenuItem = {
+        id: 'organization',
+        name: 'Organization',
+        path: '/organization',
+        icon: (
+            <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+            </svg>
+        )
+    }
+
+    // Add Organization menu item if user has access
+    const menuItems = showOrganization 
+        ? [...baseMenuItems.slice(0, 1), organizationMenuItem, ...baseMenuItems.slice(1)]
+        : baseMenuItems
 
     return (
         <div className="w-64 bg-white shadow-lg flex flex-col">

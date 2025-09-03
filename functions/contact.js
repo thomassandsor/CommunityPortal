@@ -66,7 +66,7 @@ function validateContactData(data, authenticatedEmail) {
 function checkRateLimit(userEmail) {
     const now = Date.now()
     const windowMs = 60 * 1000 // 1 minute
-    const maxRequests = 10 // 10 requests per minute per user (stricter than IP-based)
+    const maxRequests = 100 // Increased to 100 requests per minute per user (reasonable for normal usage)
 
     const userRequests = rateLimits.get(userEmail) || []
     const recentRequests = userRequests.filter(time => now - time < windowMs)
@@ -153,6 +153,9 @@ export const handler = async (event, context) => {
             return createAuthErrorResponse('Failed to obtain access token', 500)
         }
 
+        // Get user's admin status
+        const isAdmin = await getUserAdminStatus(userEmail)
+
         // Handle GET request - find contact by email
         if (event.httpMethod === 'GET') {
             const requestedEmail = event.queryStringParameters?.email
@@ -161,17 +164,18 @@ export const handler = async (event, context) => {
                 return createAuthErrorResponse('Email parameter is required', 400)
             }
 
-            // SECURITY: Ensure user can only access their own contact data
-            if (requestedEmail.toLowerCase() !== userEmail.toLowerCase()) {
+            // SECURITY: Ensure user can only access their own contact data (unless admin)
+            if (!isAdmin && requestedEmail.toLowerCase() !== userEmail.toLowerCase()) {
                 return createAuthErrorResponse('Access denied: Can only access your own contact', 403)
             }
 
-            console.log(`Authenticated user ${userEmail} looking up their contact`)
+            console.log(`${isAdmin ? 'Admin' : 'User'} ${userEmail} looking up contact: ${requestedEmail}`)
 
             // Security: Use secure email sanitization and filter building
             const sanitizedEmail = sanitizeEmail(requestedEmail)
             const filter = buildSecureEmailFilter(sanitizedEmail)
-            const select = 'contactid,firstname,lastname,emailaddress1,mobilephone,createdon,modifiedon'
+            // Include account information for organization features
+            const select = 'contactid,firstname,lastname,emailaddress1,mobilephone,createdon,modifiedon,cp_portaladmin,_parentcustomerid_value'
             const url = `${DATAVERSE_URL}/api/data/v9.0/contacts?$filter=${encodeURIComponent(filter)}&$select=${select}`
 
             const response = await fetch(url, {
@@ -193,11 +197,12 @@ export const handler = async (event, context) => {
             const data = await response.json()
             const contact = data.value && data.value.length > 0 ? data.value[0] : null
 
-            console.log(`Found ${data.value?.length || 0} contacts for authenticated user: ${userEmail}`)
+            console.log(`Found ${data.value?.length || 0} contacts for email: ${requestedEmail}`)
 
             return createSuccessResponse({
                 contact,
-                found: !!contact
+                found: !!contact,
+                isAdmin
             })
         }
 
@@ -284,7 +289,8 @@ export const handler = async (event, context) => {
 
             return createSuccessResponse({
                 contact: result,
-                created: !contactData.contactid
+                created: !contactData.contactid,
+                isAdmin
             })
         }
 
@@ -325,5 +331,42 @@ async function getAccessToken() {
     } catch (error) {
         console.error('Error getting access token:', error)
         return null
+    }
+}
+
+/**
+ * Helper function to check if user has admin privileges
+ */
+async function getUserAdminStatus(userEmail) {
+    try {
+        const accessToken = await getAccessToken()
+        if (!accessToken) return false
+
+        const { DATAVERSE_URL } = process.env
+        const filter = buildSecureEmailFilter(userEmail)
+        const url = `${DATAVERSE_URL}/api/data/v9.0/contacts?$filter=${encodeURIComponent(filter)}&$select=cp_portaladmin`
+
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'OData-MaxVersion': '4.0',
+                'OData-Version': '4.0',
+                'Accept': 'application/json',
+            },
+        })
+
+        if (response.ok) {
+            const data = await response.json()
+            const isAdmin = data.value?.[0]?.cp_portaladmin || false
+            console.log(`User ${userEmail} admin status: ${isAdmin}`)
+            return isAdmin
+        }
+        
+        console.log(`Could not determine admin status for ${userEmail}, defaulting to false`)
+        return false
+    } catch (error) {
+        console.error('Error checking admin status:', error)
+        return false // Default to non-admin on error
     }
 }

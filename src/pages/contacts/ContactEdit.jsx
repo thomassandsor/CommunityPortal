@@ -243,6 +243,9 @@ function ContactEdit() {
                                 <p><strong>Logged in as:</strong> {user?.primaryEmailAddress?.emailAddress}</p>
                                 <p><strong>User ID:</strong> {user?.id}</p>
                                 <p><strong>Contact ID:</strong> {contact?.contactid || 'Not found'}</p>
+                                <p><strong>Admin Status:</strong> {contact?.cp_portaladmin ? '🔑 Administrator' : '👤 Regular User'}</p>
+                                <p><strong>Company Association:</strong> {contact?._parentcustomerid_value ? `✅ ${contact._parentcustomerid_value}` : '❌ No company assigned'}</p>
+                                <p><strong>Organization Menu:</strong> {(contact?.cp_portaladmin && contact?._parentcustomerid_value) ? '✅ Should be visible' : '❌ Requirements not met'}</p>
                                 <p><strong>System:</strong> Service Principal authentication via Netlify Functions</p>
                             </div>
                         </div>
