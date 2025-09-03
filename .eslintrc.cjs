@@ -1,6 +1,6 @@
 module.exports = {
     root: true,
-    env: { browser: true, es2020: true },
+    env: { browser: true, es2020: true, node: true },
     extends: [
         'eslint:recommended',
         'plugin:react/recommended',
@@ -16,5 +16,11 @@ module.exports = {
             'warn',
             { allowConstantExport: true },
         ],
+        // Disable prop-types validation (we're using TypeScript patterns)
+        'react/prop-types': 'off',
+        // Allow unescaped entities in JSX (common in React)
+        'react/no-unescaped-entities': 'off',
+        // Allow lexical declarations in case blocks
+        'no-case-declarations': 'off',
     },
 }

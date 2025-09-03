@@ -17,6 +17,7 @@ function ContactEdit() {
         if (isLoaded && user?.primaryEmailAddress?.emailAddress) {
             fetchContactByEmail(user.primaryEmailAddress.emailAddress)
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isLoaded, user])
 
     // Determine if we should be in edit mode

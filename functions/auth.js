@@ -21,7 +21,7 @@ let tokenCache = {
     scope: null
 }
 
-export const handler = async (event, context) => {
+export const handler = async (event) => {
     // Only allow POST requests
     if (event.httpMethod !== 'POST') {
         return {

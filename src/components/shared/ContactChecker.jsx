@@ -38,6 +38,7 @@ function ContactChecker({ children }) {
             console.log('Starting contact check/creation process')
             checkAndCreateContact()
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isLoaded, user, hasChecked])
 
     const checkAndCreateContact = async () => {

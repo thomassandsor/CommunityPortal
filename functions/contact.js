@@ -92,7 +92,7 @@ function checkRateLimit(userEmail) {
     }
 }
 
-export const handler = async (event, context) => {
+export const handler = async (event) => {
     // Handle CORS preflight requests
     if (event.httpMethod === 'OPTIONS') {
         return {
@@ -115,7 +115,7 @@ export const handler = async (event, context) => {
             return createAuthErrorResponse(authError.message)
         }
 
-        const { userEmail, userId } = user
+        const { userEmail } = user
 
         // Security: Check request size limit (1MB)
         const maxBodySize = 1024 * 1024 // 1MB

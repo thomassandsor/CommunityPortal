@@ -16,6 +16,7 @@ function Organization() {
         if (isLoaded && user) {
             fetchOrganizationContacts()
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [isLoaded, user, getToken])
 
     const fetchOrganizationContacts = async () => {

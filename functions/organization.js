@@ -14,7 +14,7 @@
  * - Rate limiting protection
  */
 
-import { validateUser, createAuthErrorResponse, createSuccessResponse, sanitizeEmail, buildSecureEmailFilter } from './auth-utils.js'
+import { validateUser, createAuthErrorResponse, createSuccessResponse, buildSecureEmailFilter } from './auth-utils.js'
 
 // Rate limiting storage
 const rateLimits = new Map()
@@ -34,7 +34,7 @@ function checkRateLimit(userEmail) {
     rateLimits.set(userEmail, [...recentRequests, now])
 }
 
-export const handler = async (event, context) => {
+export const handler = async (event) => {
     // Handle CORS preflight requests
     if (event.httpMethod === 'OPTIONS') {
         return {

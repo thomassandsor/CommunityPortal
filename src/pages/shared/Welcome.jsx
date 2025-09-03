@@ -1,6 +1,5 @@
-import { useState } from 'react'
-import { Link, useLocation } from 'react-router-dom'
-import { useUser, UserButton } from '@clerk/clerk-react'
+import { Link } from 'react-router-dom'
+import { useUser } from '@clerk/clerk-react'
 import Sidebar from '../../components/shared/Sidebar'
 
 function Welcome() {

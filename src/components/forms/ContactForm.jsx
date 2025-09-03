@@ -18,7 +18,7 @@ function ContactForm({ contact, userEmail, onSave, disabled }) {
             case 'firstname':
                 if (value && value.length > 50) {
                     newErrors.firstname = 'First name cannot exceed 50 characters'
-                } else if (value && /[<>\"'&]/.test(value)) {
+                } else if (value && /[<>"'&]/.test(value)) {
                     newErrors.firstname = 'First name contains invalid characters'
                 } else {
                     delete newErrors.firstname
@@ -27,7 +27,7 @@ function ContactForm({ contact, userEmail, onSave, disabled }) {
             case 'lastname':
                 if (value && value.length > 50) {
                     newErrors.lastname = 'Last name cannot exceed 50 characters'
-                } else if (value && /[<>\"'&]/.test(value)) {
+                } else if (value && /[<>"'&]/.test(value)) {
                     newErrors.lastname = 'Last name contains invalid characters'
                 } else {
                     delete newErrors.lastname
@@ -48,7 +48,7 @@ function ContactForm({ contact, userEmail, onSave, disabled }) {
             case 'mobilephone':
                 if (value && value.length > 50) {
                     newErrors.mobilephone = 'Mobile phone cannot exceed 50 characters'
-                } else if (value && /[<>\"'&]/.test(value)) {
+                } else if (value && /[<>"'&]/.test(value)) {
                     newErrors.mobilephone = 'Mobile phone contains invalid characters'
                 } else {
                     delete newErrors.mobilephone

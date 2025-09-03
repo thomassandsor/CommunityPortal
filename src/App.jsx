@@ -1,5 +1,5 @@
 import { Routes, Route } from 'react-router-dom'
-import { SignedIn, SignedOut, RedirectToSignIn } from '@clerk/clerk-react'
+import { SignedIn, SignedOut } from '@clerk/clerk-react'
 import ContactChecker from './components/shared/ContactChecker'
 import Landing from './pages/shared/Landing'
 import Welcome from './pages/shared/Welcome'

@@ -1,4 +1,4 @@
-import { SignIn, useSignIn } from '@clerk/clerk-react'
+import { useSignIn } from '@clerk/clerk-react'
 
 // Custom Personal Login Button (Google/Gmail)
 function PersonalLoginButton() {
