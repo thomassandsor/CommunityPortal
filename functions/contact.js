@@ -140,12 +140,17 @@ export const handler = async (event) => {
         }
 
         // Get environment variables
-        const { DATAVERSE_URL } = process.env
+        const { DATAVERSE_URL, CONTACT_VIEW_GUID, CONTACT_FORM_GUID } = process.env
 
         if (!DATAVERSE_URL) {
             console.error('Missing DATAVERSE_URL environment variable')
             return createAuthErrorResponse('Server configuration error', 500)
         }
+
+        // Log available environment variables for debugging (first occurrence)
+        console.log(`🔧 Environment check - DATAVERSE_URL: ${DATAVERSE_URL ? 'Set' : 'Missing'}`)
+        console.log(`🔧 Environment check - CONTACT_VIEW_GUID: ${CONTACT_VIEW_GUID ? 'Set' : 'Missing'}`)
+        console.log(`🔧 Environment check - CONTACT_FORM_GUID: ${CONTACT_FORM_GUID ? 'Set' : 'Missing'}`)
 
         // Get access token by calling our auth function
         const accessToken = await getAccessToken()
@@ -342,7 +347,7 @@ async function getUserAdminStatus(userEmail) {
         const accessToken = await getAccessToken()
         if (!accessToken) return false
 
-        const { DATAVERSE_URL } = process.env
+        const { DATAVERSE_URL, CONTACT_VIEW_GUID, CONTACT_FORM_GUID } = process.env
         const filter = buildSecureEmailFilter(userEmail)
         const url = `${DATAVERSE_URL}/api/data/v9.0/contacts?$filter=${encodeURIComponent(filter)}&$select=cp_portaladmin`
 
