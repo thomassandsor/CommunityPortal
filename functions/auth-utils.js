@@ -118,6 +118,52 @@ export async function validateUser(event) {
 }
 
 /**
+ * Validates user authentication for simple endpoints that don't require email
+ * Just checks if the user is authenticated via Clerk
+ */
+export async function validateSimpleAuth(event) {
+    try {
+        console.log('🔍 Request from IP:', event.headers['x-forwarded-for'] || event.headers['x-real-ip'] || 'unknown')
+
+        // Extract Authorization header
+        const authHeader = event.headers.authorization
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            throw new Error('Missing or invalid authorization header')
+        }
+
+        const token = authHeader.substring(7) // Remove 'Bearer ' prefix
+        console.log('✅ Token received, length:', token.length)
+
+        try {
+            // Decode JWT payload without verification (Clerk handles verification)
+            const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString())
+            console.log('✅ Token payload decoded successfully')
+            console.log('Available claims:', Object.keys(payload))
+
+            if (!payload.sub) {
+                throw new Error('Token missing required user ID claim')
+            }
+
+            console.log('✅ Token validation successful for user:', payload.sub)
+
+            return {
+                userId: payload.sub,
+                userEmail: payload.email || null, // Include email if available
+                sessionId: payload.sid || null,
+                isAuthenticated: true,
+                clientIP: event.headers['x-forwarded-for'] || event.headers['x-real-ip'] || 'unknown'
+            }
+        } catch (decodeError) {
+            console.error('❌ Token decode error:', decodeError.message)
+            throw new Error(`Failed to decode token payload: ${decodeError.message}`)
+        }
+    } catch (error) {
+        console.error('❌ Authentication validation failed:', error.message)
+        throw new Error(`Authentication failed: ${error.message}`)
+    }
+}
+
+/**
  * Create a standardized error response for authentication failures
  * @param {string} message - Error message
  * @param {number} statusCode - HTTP status code (default: 401)

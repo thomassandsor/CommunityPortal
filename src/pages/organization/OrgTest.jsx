@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useUser, useAuth } from '@clerk/clerk-react'
 import { useNavigate } from 'react-router-dom'
-import Sidebar from '../../components/shared/Sidebar'
+import DynamicSidebar from '../../components/shared/DynamicSidebar'
 
 function OrgTest() {
     const { user, isLoaded } = useUser()
@@ -292,7 +292,7 @@ function OrgTest() {
 
     return (
         <div className="min-h-screen bg-gray-50 flex">
-            <Sidebar />
+            <DynamicSidebar />
 
             <div className="flex-1 flex flex-col">
                 {/* Header */}

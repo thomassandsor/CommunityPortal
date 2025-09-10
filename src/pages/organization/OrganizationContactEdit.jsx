@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useUser, useAuth } from '@clerk/clerk-react'
-import Sidebar from '../../components/shared/Sidebar'
+import DynamicSidebar from '../../components/shared/DynamicSidebar'
 
 function OrganizationContactEdit() {
     const { contactId } = useParams()
@@ -147,7 +147,7 @@ function OrganizationContactEdit() {
             }
 
             console.log('✅ Contact saved successfully')
-            navigate('/organization/test?success=Contact updated successfully')
+            navigate('/organization?success=Contact updated successfully')
             
         } catch (error) {
             console.error('Error saving contact:', error)
@@ -323,7 +323,7 @@ function OrganizationContactEdit() {
     if (loading) {
         return (
             <div className="min-h-screen bg-gray-50 flex">
-                <Sidebar />
+                <DynamicSidebar />
                 <div className="flex-1 flex items-center justify-center">
                     <div className="text-center">
                         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
@@ -337,13 +337,13 @@ function OrganizationContactEdit() {
     if (error) {
         return (
             <div className="min-h-screen bg-gray-50 flex">
-                <Sidebar />
+                <DynamicSidebar />
                 <div className="flex-1 flex items-center justify-center">
                     <div className="text-center">
                         <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-3 rounded">
                             <p>Error: {error}</p>
                             <button 
-                                onClick={() => navigate('/organization/test')}
+                                onClick={() => navigate('/organization')}
                                 className="mt-2 text-blue-600 hover:text-blue-800"
                             >
                                 ← Back to Organization
@@ -357,7 +357,7 @@ function OrganizationContactEdit() {
 
     return (
         <div className="min-h-screen bg-gray-50 flex">
-            <Sidebar />
+            <DynamicSidebar />
 
             <div className="flex-1 flex flex-col">
                 {/* Header */}
@@ -372,7 +372,7 @@ function OrganizationContactEdit() {
                             </p>
                         </div>
                         <button
-                            onClick={() => navigate('/orgtest')}
+                            onClick={() => navigate('/organization')}
                             className="text-gray-600 hover:text-gray-800"
                         >
                             ← Back to Organization View
@@ -417,7 +417,7 @@ function OrganizationContactEdit() {
                                 <div className="flex justify-end space-x-3 pt-6 border-t">
                                     <button
                                         type="button"
-                                        onClick={() => navigate('/organization/test')}
+                                        onClick={() => navigate('/organization')}
                                         className="px-4 py-2 border border-gray-300 rounded-md text-sm font-medium text-gray-700 hover:bg-gray-50"
                                     >
                                         Cancel

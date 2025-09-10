@@ -3,7 +3,7 @@ import { useUser } from '@clerk/clerk-react'
 import { useNavigate } from 'react-router-dom'
 import { useContact } from '../../hooks/useContact'
 import ContactForm from '../../components/forms/ContactForm'
-import Sidebar from '../../components/shared/Sidebar'
+import DynamicSidebar from '../../components/shared/DynamicSidebar'
 
 function ContactEdit() {
     const { user, isLoaded } = useUser()
@@ -60,7 +60,7 @@ function ContactEdit() {
     if (!isLoaded) {
         return (
             <div className="min-h-screen bg-gray-50 flex">
-                <Sidebar />
+                <DynamicSidebar />
                 <div className="flex-1 flex items-center justify-center">
                     <div className="text-lg text-gray-600">Loading...</div>
                 </div>
@@ -70,7 +70,7 @@ function ContactEdit() {
 
     return (
         <div className="min-h-screen bg-gray-50 flex">
-            <Sidebar />
+            <DynamicSidebar />
 
             {/* Main Content */}
             <div className="flex-1 flex flex-col">

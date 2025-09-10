@@ -1,13 +1,13 @@
 import { Link } from 'react-router-dom'
 import { useUser } from '@clerk/clerk-react'
-import Sidebar from '../../components/shared/Sidebar'
+import DynamicSidebar from '../../components/shared/DynamicSidebar'
 
 function Welcome() {
     const { user } = useUser()
 
     return (
         <div className="min-h-screen bg-gray-50 flex">
-            <Sidebar />
+            <DynamicSidebar />
 
             {/* Main Content */}
             <div className="flex-1 flex flex-col">

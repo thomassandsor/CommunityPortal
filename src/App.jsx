@@ -6,8 +6,9 @@ import Welcome from './pages/shared/Welcome'
 import ContactEdit from './pages/contacts/ContactEdit'
 import Success from './pages/shared/Success'
 import Organization from './pages/organization/Organization'
-import OrgTest from './pages/organization/OrgTest'
 import OrganizationContactEdit from './pages/organization/OrganizationContactEdit'
+import EntityList from './pages/generic/EntityList'
+import EntityEdit from './pages/generic/EntityEdit'
 
 function App() {
     return (
@@ -48,21 +49,28 @@ function App() {
                     </SignedIn>
                 } />
 
-                <Route path="/orgtest" element={
-                    <SignedIn>
-                        <OrgTest />
-                    </SignedIn>
-                } />
-
-                <Route path="/organization/test" element={
-                    <SignedIn>
-                        <OrgTest />
-                    </SignedIn>
-                } />
-
-                <Route path="/orgtest/edit/:contactId" element={
+                <Route path="/organization/edit/:contactId" element={
                     <SignedIn>
                         <OrganizationContactEdit />
+                    </SignedIn>
+                } />
+
+                {/* Generic entity routes */}
+                <Route path="/entity/:entityName" element={
+                    <SignedIn>
+                        <EntityList />
+                    </SignedIn>
+                } />
+
+                <Route path="/entity/:entityName/edit" element={
+                    <SignedIn>
+                        <EntityEdit />
+                    </SignedIn>
+                } />
+
+                <Route path="/entity/:entityName/create" element={
+                    <SignedIn>
+                        <EntityEdit />
                     </SignedIn>
                 } />
 

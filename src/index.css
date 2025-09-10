@@ -1,3 +1,161 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* Rich Text Editor Styles */
+.rich-text-editor .ql-editor {
+    min-height: 150px;
+}
+
+.rich-text-editor .ql-toolbar {
+    border-top: 1px solid #e5e7eb;
+    border-left: 1px solid #e5e7eb;
+    border-right: 1px solid #e5e7eb;
+    border-bottom: none;
+}
+
+.rich-text-editor .ql-container {
+    border-bottom: 1px solid #e5e7eb;
+    border-left: 1px solid #e5e7eb;
+    border-right: 1px solid #e5e7eb;
+    border-top: none;
+}
+
+/* Rich Text Content Styling */
+.rich-text-content {
+    color: #374151;
+    line-height: 1.6;
+}
+
+.rich-text-content h1,
+.rich-text-content h2,
+.rich-text-content h3 {
+    font-weight: 600;
+    margin-top: 1.5em;
+    margin-bottom: 0.5em;
+}
+
+.rich-text-content h1 {
+    font-size: 1.5em;
+}
+
+.rich-text-content h2 {
+    font-size: 1.25em;
+}
+
+.rich-text-content h3 {
+    font-size: 1.1em;
+}
+
+.rich-text-content p {
+    margin-bottom: 1em;
+}
+
+/* Enhanced list styling */
+.rich-text-content ul,
+.rich-text-content ol {
+    margin-bottom: 1em;
+    padding-left: 2em;
+    list-style-position: outside;
+}
+
+.rich-text-content ul {
+    list-style-type: disc;
+}
+
+.rich-text-content ul ul {
+    list-style-type: circle;
+    margin-top: 0.5em;
+    margin-bottom: 0.5em;
+}
+
+.rich-text-content ul ul ul {
+    list-style-type: square;
+}
+
+.rich-text-content ol {
+    list-style-type: decimal;
+}
+
+.rich-text-content ol ol {
+    list-style-type: lower-alpha;
+    margin-top: 0.5em;
+    margin-bottom: 0.5em;
+}
+
+.rich-text-content ol ol ol {
+    list-style-type: lower-roman;
+}
+
+.rich-text-content li {
+    margin-bottom: 0.5em;
+    padding-left: 0.25em;
+    display: list-item;
+}
+
+.rich-text-content li p {
+    margin-bottom: 0.5em;
+}
+
+.rich-text-content li:last-child {
+    margin-bottom: 0;
+}
+
+/* Handle CKEditor specific classes */
+.rich-text-content .ck-content ul,
+.rich-text-content .ck-content ol {
+    margin-bottom: 1em;
+    padding-left: 2em;
+}
+
+.rich-text-content .ck-content li {
+    margin-bottom: 0.5em;
+    display: list-item;
+}
+
+/* Force list styles even with inline styles */
+.rich-text-content ul li {
+    list-style: disc !important;
+    display: list-item !important;
+}
+
+.rich-text-content ol li {
+    list-style: decimal !important;
+    display: list-item !important;
+}
+
+/* Handle various rich text editor formats */
+.rich-text-content div[style*="list-style"] ul,
+.rich-text-content div[style*="list-style"] ol {
+    list-style: inherit !important;
+}
+
+/* Reset any conflicting styles from rich text editors */
+.rich-text-content * {
+    max-width: none;
+}
+
+.rich-text-content div {
+    margin-bottom: 0.5em;
+}
+
+.rich-text-content div:last-child {
+    margin-bottom: 0;
+}
+
+.rich-text-content a {
+    color: #2563eb;
+    text-decoration: underline;
+}
+
+.rich-text-content a:hover {
+    color: #1d4ed8;
+}
+
+.rich-text-content strong {
+    font-weight: 600;
+}
+
+.rich-text-content em {
+    font-style: italic;
+}
