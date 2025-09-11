@@ -311,13 +311,18 @@ async function handleCreateRequest(accessToken, entityConfig, userContact, reque
 
     const data = JSON.parse(requestBody)
     
+    // Sanitize rich text fields for Dataverse compatibility
+    const sanitizedData = sanitizeDataForDataverse(data, entityConfig)
+    
     // Add security field if configured
     if (entityConfig.contactRelationField && userContact && userContact._parentcustomerid_value) {
-        data[entityConfig.contactRelationField] = userContact._parentcustomerid_value
+        sanitizedData[entityConfig.contactRelationField] = userContact._parentcustomerid_value
     }
 
     const { DATAVERSE_URL } = process.env
     const url = `${DATAVERSE_URL}/api/data/v9.0/${getEntitySetName(entityConfig.entityLogicalName)}`
+    
+    console.log(`🧹 Sanitized data for create:`, sanitizedData)
     
     const response = await fetch(url, {
         method: 'POST',
@@ -328,7 +333,7 @@ async function handleCreateRequest(accessToken, entityConfig, userContact, reque
             'OData-Version': '4.0',
             'Accept': 'application/json',
         },
-        body: JSON.stringify(data)
+        body: JSON.stringify(sanitizedData)
     })
 
     if (!response.ok) {
@@ -351,19 +356,176 @@ async function handleCreateRequest(accessToken, entityConfig, userContact, reque
 }
 
 /**
+ * Sanitize data for Dataverse compatibility - only include form-editable fields
+ */
+function sanitizeDataForDataverse(data, entityConfig, formMetadata = null) {
+    console.log(`🧹 Starting data sanitization for entity: ${entityConfig.entityLogicalName}`)
+    
+    const editableData = {}
+    
+    // Use form metadata to determine editable fields if available
+    if (formMetadata && formMetadata.structure && formMetadata.structure.tabs) {
+        console.log(`📋 Using form metadata to determine editable fields`)
+        console.log(`📋 Form structure debug:`, JSON.stringify(formMetadata.structure, null, 2))
+        
+        // Extract all fields from all tabs and sections
+        const allFormFields = []
+        formMetadata.structure.tabs.forEach(tab => {
+            console.log(`📋 Processing tab: ${tab.name} (${tab.sections?.length || 0} sections)`)
+            if (tab.sections) {
+                tab.sections.forEach(section => {
+                    console.log(`📋 Processing section: ${section.name}`)
+                    if (section.rows) {
+                        section.rows.forEach(row => {
+                            if (row.cells) {
+                                row.cells.forEach(cell => {
+                                    if (cell.controls) {
+                                        cell.controls.forEach(control => {
+                                            if (control.datafieldname && control.type === 'control') {
+                                                allFormFields.push({
+                                                    name: control.datafieldname,
+                                                    controlType: control.controlType,
+                                                    displayName: control.displayName,
+                                                    disabled: control.disabled,
+                                                    isRichText: control.isRichText
+                                                })
+                                                console.log(`📋 Found field: ${control.datafieldname} (${control.controlType})`)
+                                            }
+                                        })
+                                    }
+                                })
+                            }
+                        })
+                    }
+                })
+            }
+        })
+        
+        console.log(`📝 Found ${allFormFields.length} fields on form`)
+        
+        if (allFormFields.length === 0) {
+            console.error(`❌ No fields found in form metadata - form structure may be incomplete`)
+            console.log(`📋 Full form metadata:`, JSON.stringify(formMetadata, null, 2))
+        }
+        
+        allFormFields.forEach(field => {
+            const fieldName = field.name
+            
+            // Skip system read-only fields
+            if (fieldName === 'createdon' || 
+                fieldName === 'modifiedon' || 
+                fieldName === 'createdby' || 
+                fieldName === 'modifiedby') {
+                console.log(`⏭️ Skipping system read-only field: ${fieldName}`)
+                return
+            }
+            
+            // Skip lookup fields (view only as per requirements)
+            if (field.controlType === 'lookup') {
+                console.log(`⏭️ Skipping lookup field (view only): ${fieldName}`)
+                return
+            }
+            
+            // Include the field if it exists in the data
+            if (data.hasOwnProperty(fieldName)) {
+                editableData[fieldName] = data[fieldName]
+                
+                // Apply rich text sanitization if needed
+                if (field.controlType === 'richtext' && typeof editableData[fieldName] === 'string') {
+                    console.log(`🧹 Sanitizing rich text field: ${fieldName}`)
+                    console.log(`📄 Original content preview:`, editableData[fieldName].substring(0, 100))
+                    editableData[fieldName] = sanitizeRichTextForDataverse(editableData[fieldName])
+                    console.log(`✅ Sanitized content preview:`, editableData[fieldName].substring(0, 100))
+                }
+                
+                console.log(`✅ Including form field: ${fieldName} (${field.controlType || 'text'})`)
+            } else {
+                console.log(`⚠️ Form field ${fieldName} not found in request data`)
+            }
+        })
+    } else {
+        console.error(`❌ No form metadata available for ${entityConfig.entityLogicalName} - cannot determine editable fields`)
+        throw new Error(`Form metadata missing for ${entityConfig.entityLogicalName} - cannot determine editable fields`)
+    }
+    
+    console.log(`🧹 Final editable fields to update:`, Object.keys(editableData))
+    console.log(`🧹 Excluded from update:`, Object.keys(data).filter(key => !editableData.hasOwnProperty(key)))
+    
+    return editableData
+}
+
+/**
+ * Sanitize rich text content for Dataverse
+ */
+function sanitizeRichTextForDataverse(html) {
+    if (!html || typeof html !== 'string') return html
+    
+    console.log(`🧹 Original HTML (${html.length} chars):`, html)
+    
+    // Be more conservative with sanitization - focus on removing only problematic elements
+    let sanitized = html
+    
+    // Remove CKEditor-specific wrapper divs but preserve list structures
+    sanitized = sanitized.replace(/<div[^>]*class="ck-content"[^>]*>/gi, '')
+    sanitized = sanitized.replace(/<\/div>\s*$/gi, '')
+    
+    // Remove data-wrapper attributes but preserve list-related attributes
+    sanitized = sanitized.replace(/\s*data-wrapper="[^"]*"/gi, '')
+    
+    // Remove dir attributes
+    sanitized = sanitized.replace(/\s*dir="[^"]*"/gi, '')
+    
+    // Be more careful with style removal - only remove CKEditor-specific styles
+    sanitized = sanitized.replace(/style="[^"]*--ck-[^"]*"/gi, '')
+    sanitized = sanitized.replace(/style="[^"]*ck-[^"]*"/gi, '')
+    
+    // Clean up empty style attributes
+    sanitized = sanitized.replace(/\s*style=""\s*/gi, '')
+
+    // DON'T remove list-related HTML or font-size spans - preserve all formatting
+    
+    console.log(`🧹 Sanitized HTML (${sanitized.length} chars):`, sanitized)
+    
+    return sanitized.trim()
+}
+
+/**
  * Handle update request
  */
 async function handleUpdateRequest(accessToken, entityConfig, userContact, entityId, requestBody) {
-    console.log(`📝 Updating ${entityConfig.entityLogicalName}: ${entityId}`)
+    console.log(`� UPDATE REQUEST RECEIVED 🚨`)
+    console.log(`�📝 Updating ${entityConfig.entityLogicalName}: ${entityId}`)
+    console.log(`📦 Request body length: ${requestBody?.length || 0} characters`)
     
     if (!requestBody) {
         throw new Error('Request body is required for update operation')
     }
 
     const data = JSON.parse(requestBody)
+    console.log(`📊 Parsed data keys:`, Object.keys(data))
+    
+    // Get form metadata to determine which fields are editable
+    let formMetadata = null
+    if (entityConfig.formGuid) {
+        console.log(`📋 Fetching form metadata for GUID: ${entityConfig.formGuid}`)
+        try {
+            formMetadata = await getFormMetadata(accessToken, entityConfig.formGuid)
+            console.log(`✅ Form metadata loaded: ${formMetadata.name}`)
+        } catch (error) {
+            console.error(`❌ Failed to load form metadata: ${error.message}`)
+            throw new Error(`Cannot determine editable fields - form metadata unavailable`)
+        }
+    } else {
+        throw new Error(`Form GUID not configured for entity ${entityConfig.entityLogicalName}`)
+    }
+    
+    // Sanitize data based on form metadata
+    const sanitizedData = sanitizeDataForDataverse(data, entityConfig, formMetadata)
     
     const { DATAVERSE_URL } = process.env
     const url = `${DATAVERSE_URL}/api/data/v9.0/${getEntitySetName(entityConfig.entityLogicalName)}(${entityId})`
+    
+    console.log(`🧹 Sanitized data for update:`, sanitizedData)
     
     const response = await fetch(url, {
         method: 'PATCH',
@@ -374,12 +536,13 @@ async function handleUpdateRequest(accessToken, entityConfig, userContact, entit
             'OData-Version': '4.0',
             'Accept': 'application/json',
         },
-        body: JSON.stringify(data)
+        body: JSON.stringify(sanitizedData)
     })
 
     if (!response.ok) {
         const errorText = await response.text()
         console.error('Failed to update entity:', response.status, errorText)
+        console.error('Request data:', sanitizedData)
         throw new Error(`Failed to update entity: ${response.status}`)
     }
 

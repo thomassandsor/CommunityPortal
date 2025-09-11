@@ -136,8 +136,8 @@ CommunityPortal/
 │   └── components/
 │       ├── forms/               # Form components
 │       │   ├── ContactForm.jsx  # Contact data form
-│       │   ├── RichTextEditor.jsx # Rich text editing
-│       │   └── RichTextViewer.jsx # Rich text display
+│       │   ├── SimpleRichTextEditor.jsx # Native rich text editing
+│       │   └── SimpleRichTextViewer.jsx # Safe rich text display
 │       └── shared/              # Shared components
 │           ├── ContactChecker.jsx # Auto contact management
 │           ├── DynamicSidebar.jsx # Dynamic navigation menu
@@ -426,7 +426,7 @@ export const handler = async (event) => {
 ```javascript
 // src/pages/generic/EntityEdit.jsx - Universal entity editing
 import { useState, useEffect } from 'react'
-import RichTextEditor from '../../components/forms/RichTextEditor'
+import SimpleRichTextEditor from '../../components/forms/SimpleRichTextEditor'
 
 function EntityEdit() {
   // Mode detection: create vs edit vs view
@@ -447,7 +447,7 @@ function EntityEdit() {
   const renderField = (field) => {
     switch (field.controlType) {
       case 'richtext':
-        return <RichTextEditor value={formData[field.name]} onChange={...} />
+        return <SimpleRichTextEditor value={formData[field.name]} onChange={...} />
       case 'lookup':
         return <div>{getLookupDisplayValue(formData, field.name)}</div>
       default:
@@ -508,33 +508,31 @@ function ContactChecker({ children }) {
 }
 ```
 
-#### 7. Rich Text Editor Pattern (NEW)
+#### 7. Rich Text Editor Pattern (UPDATED)
 ```javascript
-// components/forms/RichTextEditor.jsx - Quill.js integration
-import ReactQuill from 'react-quill'
-import 'react-quill/dist/quill.snow.css'
-
-function RichTextEditor({ value, onChange, placeholder, readOnly = false }) {
+// components/forms/SimpleRichTextEditor.jsx - Native contentEditable implementation
+function SimpleRichTextEditor({ value, onChange, placeholder, readOnly = false }) {
   const modules = {
     toolbar: [
-      [{ 'header': [1, 2, 3, false] }],
-      ['bold', 'italic', 'underline', 'strike'],
-      [{ 'list': 'ordered'}, { 'list': 'bullet' }],
-      ['link', 'image'],
-      ['clean']
+      'bold', 'italic', 'underline',
+      'h1', 'h2', 'h3',
+      'ul', 'ol',
+      'link'
     ]
   }
   
   return (
-    <ReactQuill
-      theme="snow"
-      value={value || ''}
-      onChange={onChange}
-      modules={modules}
-      placeholder={placeholder}
-      readOnly={readOnly}
-    />
+    <div className="border border-gray-300 rounded-md">
+      {!readOnly && <Toolbar />}
+      <div
+        contentEditable={!readOnly}
+        className="min-h-[200px] p-3 prose max-w-none"
+        onInput={(e) => onChange(e.target.innerHTML)}
+        dangerouslySetInnerHTML={{ __html: value || '' }}
+      />
+    </div>
   )
+}
 }
 ```
 
@@ -652,8 +650,7 @@ CLERK_SECRET_KEY=
 ### Dependencies
 ```json
 {
-  "react-quill": "^2.0.0",
-  "quill": "^1.3.7"
+  "Note": "Rich text editing now uses native browser APIs - no external dependencies required"
 }
 ```
 
@@ -688,7 +685,7 @@ CLERK_SECRET_KEY=
 1. **Entity Configuration**: Add entity to `cp_entityconfigurations` table in Dataverse
 2. **Function**: Use `functions/generic-entity.js` (no need to create new files)
 3. **Component**: Use `src/pages/generic/EntityEdit.jsx` (universal component)
-4. **Rich Text Fields**: Use `RichTextEditor` component for multiline text
+4. **Rich Text Fields**: Use `SimpleRichTextEditor` component for multiline text
 5. **Lookup Fields**: Ensure navigation properties are properly mapped
 6. **Route**: Add dynamic route in App.jsx: `/entity/:entityName/:mode?/:entityId?`
 7. **Documentation**: Update README.md with new functionality

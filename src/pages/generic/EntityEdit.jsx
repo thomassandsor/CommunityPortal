@@ -2,8 +2,8 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useUser, useAuth } from '@clerk/clerk-react'
 import DynamicSidebar from '../../components/shared/DynamicSidebar'
-import RichTextEditor from '../../components/forms/RichTextEditor'
-import RichTextViewer from '../../components/forms/RichTextViewer'
+import SimpleRichTextEditor from '../../components/forms/SimpleRichTextEditor'
+import SimpleRichTextViewer from '../../components/forms/SimpleRichTextViewer'
 
 function EntityEdit() {
     // Get route parameters for backward compatibility
@@ -63,13 +63,15 @@ function EntityEdit() {
             const promises = [fetchFormMetadata()]
             if (!isCreateMode && entityId) {
                 // Always fetch fresh data for edit mode to ensure lookup expansion
-                console.log('� Fetching fresh entity data to get lookup expansions')
+                console.log('🔄 Fetching fresh entity data to get lookup expansions')
                 promises.push(fetchEntity())
             }
             
             Promise.all(promises).then(([formMetadata, entityData]) => {
                 // Initialize form data immediately with both results
-                initializeFormData(entityData, formMetadata)
+                // For edit mode, prefer fresh data but fall back to selectedEntity
+                const dataToUse = entityData || selectedEntity
+                initializeFormData(dataToUse, formMetadata)
                 
                 // Set edit mode: create mode = editing, edit mode = view first
                 setIsEditing(isCreateMode)
@@ -82,7 +84,7 @@ function EntityEdit() {
                 setLoading(false)
             })
         }
-    }, [user, entityName, entityId, dataInitialized, isCreateMode, modeInitialized])
+    }, [user, entityName, entityId, dataInitialized, isCreateMode, modeInitialized, selectedEntity])
 
     const fetchEntity = async () => {
         if (!entityId) {
@@ -154,11 +156,6 @@ function EntityEdit() {
                 // Include all fields, even if they're null/undefined (we'll handle display separately)
                 initialData[key] = entityData[key]
             })
-            
-            // DEBUG: Log the data we're working with
-            console.log('🔍 Entity data received:', entityData)
-            console.log('🔍 Looking for cp_Contact:', entityData.cp_Contact)
-            console.log('🔍 formData will include:', Object.keys(initialData))
         } else {
             // Create mode: initialize with default values
             console.log('🆕 Initializing form for create mode')
@@ -238,6 +235,14 @@ function EntityEdit() {
             }
 
             console.log(`💾 Saving ${entityName}:`, saveData)
+            
+            // Debug rich text fields specifically
+            Object.entries(saveData).forEach(([key, value]) => {
+                if (typeof value === 'string' && value.includes('<')) {
+                    console.log(`🔍 Rich text field ${key}:`, value.substring(0, 200))
+                    console.log(`🔍 Starts with <p tag?`, value.startsWith('<p'))
+                }
+            })
 
             const response = await fetch(url, {
                 method: method,
@@ -409,8 +414,7 @@ function EntityEdit() {
             case 'richtext':
                 return (
                     <div>
-                        {/* Try to render rich text editor, fall back to textarea if it fails */}
-                        <RichTextEditor
+                        <SimpleRichTextEditor
                             value={value || ''}
                             onChange={(content) => handleInputChange(field.datafieldname, content)}
                             disabled={isDisabled}
@@ -474,8 +478,7 @@ function EntityEdit() {
             case 'richtext':
                 return (
                     <div>
-                        {/* Try to render rich text viewer, fall back to plain text if it fails */}
-                        <RichTextViewer
+                        <SimpleRichTextViewer
                             content={value}
                             label={getFieldDisplayName(field)}
                             emptyMessage="No content provided"
@@ -668,17 +671,6 @@ function EntityEdit() {
                                             {/* Tab Content - Mixed layout accommodating rich text fields */}
                                             <div className="space-y-6">
                                                 {tab.sections?.map(section => {
-                                                    // SECTION VISIBILITY DEBUG - Focus on label/visibility status
-                                                    console.log('� SECTION VISIBILITY ANALYSIS:', {
-                                                        sectionName: section.name,
-                                                        displayName: section.displayName,
-                                                        visible: section.visible,
-                                                        hidden: section.hidden,
-                                                        showLabel: section.showLabel,
-                                                        hideLabel: section.hideLabel,
-                                                        allKeys: Object.keys(section)
-                                                    })
-                                                    
                                                     // Collect all fields for this section
                                                     const allFields = []
                                                     section.rows?.forEach(row => {
@@ -736,14 +728,6 @@ function EntityEdit() {
                                                         section.hideLabel !== true &&
                                                         section.displayName !== 'false'  // Handle Dataverse 'false' string
                                                     )
-                                                    
-                                                    // FINAL SECTION DECISION - This shows the actual visibility logic
-                                                    console.log('📋 SECTION DECISION:', {
-                                                        sectionName: section.name,
-                                                        shouldShowSection: shouldShowSection,
-                                                        shouldShowSectionHeader: shouldShowSectionHeader,
-                                                        finalAction: shouldShowSection ? 'RENDER SECTION' : 'HIDE SECTION'
-                                                    })
                                                     
                                                     // Only render section if it should be visible
                                                     if (!shouldShowSection) {
