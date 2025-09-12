@@ -797,10 +797,12 @@ The most recent development session focused on **fixing lookup field display in 
 - 🔄 Final verification needed: Check if "Thomas Sandsør" now displays instead of "Not provided"
 
 ### For New AI Assistant Taking Over
-1. **First Priority**: Verify that the Contact field now shows "Thomas Sandsør" instead of "Not provided"
-2. **If Still Not Working**: Check the latest console logs and verify the `getLookupDisplayValue` function is being called correctly
-3. **Key Files Modified**: `functions/generic-entity.js`, `src/pages/generic/EntityEdit.jsx`
-4. **Testing Pattern**: Load an idea entity with a contact lookup field and verify display
+1. **CRITICAL CURRENT ISSUE**: Contact lookup field not saving to Dataverse when creating Ideas
+2. **Status**: Frontend working (sends correct GUID), backend returns 200 OK, but no relationship created
+3. **Debugging Added**: Extensive logging in `sanitizeDataForDataverse()` function
+4. **Key Test**: Create Idea with title "Debug Test X" and check backend logs for field analysis
+5. **Files Modified**: `functions/generic-entity.js` (debugging), `src/pages/generic/EntityEdit.jsx` (contact auto-population)
+6. **User Context**: Thomas (sandsor@gmail.com), Contact GUID: 61f225a9-007e-f011-b4cb-7ced8d5de1dd
 
 ### Critical Code Patterns That Must Be Maintained
 ```javascript

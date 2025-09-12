@@ -1,16 +1,37 @@
 import { useState, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useUser, useAuth } from '@clerk/clerk-react'
+import { useContact } from '../../hooks/useContact'
+import { getCurrentUserContactGuid, getCurrentUserContact, getCurrentUserDisplayName } from '../../utils/contactUtils'
 import DynamicSidebar from '../../components/shared/DynamicSidebar'
 import SimpleRichTextEditor from '../../components/forms/SimpleRichTextEditor'
 import SimpleRichTextViewer from '../../components/forms/SimpleRichTextViewer'
 
 function EntityEdit() {
-    // Get route parameters for backward compatibility
+    // Get route parameters and location for mode detection
     const { entityName, entityId: urlEntityId } = useParams()
+    const location = useLocation()
     const navigate = useNavigate()
     const { user } = useUser()
     const { getToken } = useAuth()
+    
+    // Get current user's contact information
+    const { contact: userContact, fetchContactByEmail } = useContact()
+    
+    // Fetch user contact when component mounts
+    useEffect(() => {
+        if (user?.primaryEmailAddress?.emailAddress && !userContact) {
+            console.log('🚨 FETCHING USER CONTACT for:', user.primaryEmailAddress.emailAddress)
+            fetchContactByEmail(user.primaryEmailAddress.emailAddress)
+        } else {
+            console.log('🚨 CONTACT FETCH SKIPPED:', {
+                hasEmail: !!user?.primaryEmailAddress?.emailAddress,
+                email: user?.primaryEmailAddress?.emailAddress,
+                hasContact: !!userContact,
+                contact: userContact
+            })
+        }
+    }, [user?.primaryEmailAddress?.emailAddress, userContact])
     
     const [entity, setEntity] = useState(null)
     const [entityConfig, setEntityConfig] = useState(null)
@@ -31,29 +52,40 @@ function EntityEdit() {
 
     // Initialize mode and selected entity
     useEffect(() => {
-        // Check if we have a selected entity in sessionStorage
-        const storedSelection = sessionStorage.getItem(`selected_${entityName}`)
+        // Detect create mode from URL path
+        const isCreatePath = location.pathname.includes('/create')
         
-        if (storedSelection) {
-            // Edit mode with selected entity
-            const selection = JSON.parse(storedSelection)
-            setSelectedEntity(selection.data)
-            setEntityId(selection.id)
-            setIsCreateMode(false)
-            console.log('📝 Edit mode - using selected entity:', selection.data)
-        } else if (urlEntityId) {
-            // Fallback to URL-based entityId for backward compatibility
-            setEntityId(urlEntityId)
-            setIsCreateMode(false)
-            console.log('📝 Edit mode - using URL entityId:', urlEntityId)
-        } else {
-            // Create mode (no selected entity or URL ID)
+        if (isCreatePath) {
+            // Explicit create mode from URL
             setIsCreateMode(true)
-            console.log('🆕 Create mode - no selected entity or URL ID')
+            setEntityId(null)
+            setSelectedEntity(null)
+            console.log('🆕 Create mode - detected from URL path:', location.pathname)
+        } else {
+            // Edit mode - check for selected entity in sessionStorage
+            const storedSelection = sessionStorage.getItem(`selected_${entityName}`)
+            
+            if (storedSelection) {
+                // Edit mode with selected entity
+                const selection = JSON.parse(storedSelection)
+                setSelectedEntity(selection.data)
+                setEntityId(selection.id)
+                setIsCreateMode(false)
+                console.log('📝 Edit mode - using selected entity:', selection.data)
+            } else if (urlEntityId) {
+                // Fallback to URL-based entityId for backward compatibility
+                setEntityId(urlEntityId)
+                setIsCreateMode(false)
+                console.log('📝 Edit mode - using URL entityId:', urlEntityId)
+            } else {
+                // Fallback create mode (no selected entity or URL ID)
+                setIsCreateMode(true)
+                console.log('🆕 Create mode - fallback (no selected entity or URL ID)')
+            }
         }
         
         setModeInitialized(true)
-    }, [entityName, urlEntityId])
+    }, [entityName, urlEntityId, location.pathname])
 
     // Single useEffect to fetch data efficiently
     useEffect(() => {
@@ -85,6 +117,42 @@ function EntityEdit() {
             })
         }
     }, [user, entityName, entityId, dataInitialized, isCreateMode, modeInitialized, selectedEntity])
+
+    // CRITICAL: Re-initialize form data when user contact becomes available in storage
+    useEffect(() => {
+        const currentContactGuid = getCurrentUserContactGuid()
+        const currentContact = getCurrentUserContact()
+        
+        if (currentContactGuid && isCreateMode && dataInitialized && formMetadata) {
+            console.log('🚨 STORED USER CONTACT AVAILABLE - Re-initializing form data')
+            console.log('🚨 Stored contact GUID:', currentContactGuid)
+            
+            // Re-initialize form data with the stored contact
+            setFormData(prev => {
+                const updated = { ...prev }
+                
+                // Find contact fields and populate them
+                if (formMetadata?.structure?.tabs) {
+                    const fields = extractFieldsFromStructure(formMetadata.structure.tabs)
+                    fields.forEach(field => {
+                        if (isContactField(field.datafieldname)) {
+                            if (field.datafieldname === 'cp_contact') {
+                                updated['cp_contact'] = currentContactGuid
+                                updated['_cp_contact_value'] = currentContactGuid
+                                console.log('🚨 RE-POPULATED contact fields with stored GUID:', currentContactGuid)
+                            } else {
+                                updated[field.datafieldname] = currentContactGuid
+                                console.log('🚨 RE-POPULATED other contact field:', field.datafieldname, currentContactGuid)
+                            }
+                        }
+                    })
+                }
+                
+                console.log('🚨 Updated form data with stored contact:', updated)
+                return updated
+            })
+        }
+    }, [isCreateMode, dataInitialized, formMetadata]) // Removed userContact dependency - now using stored data
 
     const fetchEntity = async () => {
         if (!entityId) {
@@ -157,12 +225,63 @@ function EntityEdit() {
                 initialData[key] = entityData[key]
             })
         } else {
-            // Create mode: initialize with default values
+            // Create mode: initialize with default values and auto-populate contact fields
             console.log('🆕 Initializing form for create mode')
+            console.log('🆕 User contact available:', userContact ? 'YES' : 'NO', userContact)
+            console.log('🆕 🚨 CRITICAL DEBUG - Stored contact details:')
+            const storedContact = getCurrentUserContact()
+            const storedGuid = getCurrentUserContactGuid()
+            console.log('🆕 🚨 storedContact object:', JSON.stringify(storedContact, null, 2))
+            console.log('🆕 🚨 storedContact GUID:', storedGuid)
+            console.log('🆕 🚨 typeof storedContact GUID:', typeof storedGuid)
+            
             if (formMetadata?.structure?.tabs) {
-                extractFieldsFromStructure(formMetadata.structure.tabs).forEach(field => {
-                    initialData[field.datafieldname] = getDefaultValue(field)
+                const fields = extractFieldsFromStructure(formMetadata.structure.tabs)
+                console.log('🆕 Extracted fields:', fields.map(f => f.datafieldname))
+                
+                fields.forEach(field => {
+                    const fieldName = field.datafieldname
+                    console.log(`🔍 Processing field: ${fieldName} (type: ${field.controlType})`)
+                    
+                    // Skip system fields that users can't edit
+                    if (isSystemField(fieldName)) {
+                        console.log(`⚠️ Skipping system field: ${fieldName}`)
+                        return
+                    }
+                    
+                    // Auto-populate contact fields with current user's contact
+                    const currentContactGuid = getCurrentUserContactGuid()
+                    const currentContact = getCurrentUserContact()
+                    
+                    if (isContactField(fieldName) && currentContactGuid) {
+                        // Use the original field name - conversion will happen during rendering
+                        // CRITICAL FIX: Handle cp_contact field specially
+                        if (fieldName === 'cp_contact') {
+                            // Populate BOTH field names to ensure data is available after field conversion
+                            initialData['cp_contact'] = currentContactGuid
+                            initialData['_cp_contact_value'] = currentContactGuid
+                            console.log(`👤 🚨 STORED GUID USED: Double-populated cp_contact=${currentContactGuid} AND _cp_contact_value=${currentContactGuid}`)
+                        } else {
+                            initialData[fieldName] = currentContactGuid
+                            console.log(`👤 Auto-populated contact field ${fieldName} with stored GUID: ${currentContactGuid}`)
+                        }
+                        console.log(`� Contact GUID type: ${typeof currentContactGuid}`)
+                        console.log(`👤 Contact info from storage:`, { 
+                            contactid: currentContact?.contactid, 
+                            fullname: currentContact?.fullname,
+                            email: currentContact?.emailaddress1 
+                        })
+                    } else {
+                        // Use default value for other fields
+                        const defaultValue = getDefaultValue(field)
+                        initialData[fieldName] = defaultValue
+                        console.log(`📝 Set default value for ${fieldName}: ${defaultValue}`)
+                    }
                 })
+                
+                console.log('🆕 Final initialized form data:', initialData)
+            } else {
+                console.log('⚠️ No form metadata structure available')
             }
         }
 
@@ -187,6 +306,53 @@ function EntityEdit() {
         })
         
         return allFields
+    }
+
+    // Helper function to identify system fields that users cannot edit
+    const isSystemField = (fieldName) => {
+        const systemFields = [
+            'createdon',
+            'modifiedon', 
+            '_createdby_value',
+            '_modifiedby_value',
+            '_ownerid_value', // Owner is typically managed by system
+            'statecode',
+            'statuscode',
+            'versionnumber',
+            'timezoneruleversionnumber',
+            'utcconversiontimezonecode',
+            'importsequencenumber',
+            'overriddencreatedon'
+        ]
+        
+        // Also check for entity-specific ID fields (e.g., cp_ideaid, contactid)
+        const entityIdPattern = new RegExp(`^${entityName}id$`, 'i')
+        const entityConfigIdPattern = entityConfig?.entityLogicalName ? 
+            new RegExp(`^${entityConfig.entityLogicalName}id$`, 'i') : null
+        
+        return systemFields.includes(fieldName.toLowerCase()) ||
+               entityIdPattern.test(fieldName) ||
+               (entityConfigIdPattern && entityConfigIdPattern.test(fieldName))
+    }
+
+    // Helper function to identify contact lookup fields
+    const isContactField = (fieldName) => {
+        const contactFieldPatterns = [
+            '_cp_contact_value',
+            '_contactid_value', 
+            'cp_contact',           // Original field name from form metadata
+            'contactid'
+        ]
+        
+        const isMatch = contactFieldPatterns.some(pattern => 
+            fieldName.toLowerCase() === pattern.toLowerCase()
+        )
+        
+        if (isMatch) {
+            console.log(`🔍 Detected contact field: ${fieldName}`)
+        }
+        
+        return isMatch
     }
 
     const getDefaultValue = (field) => {
@@ -221,20 +387,51 @@ function EntityEdit() {
                 ? `/.netlify/functions/generic-entity?entity=${entityName}`
                 : `/.netlify/functions/generic-entity?entity=${entityName}&id=${entityId}`
 
-            // Prepare data for save (exclude system fields for updates)
-            const saveData = { ...formData }
-            if (!isCreateMode) {
-                // Remove read-only system fields for updates using the correct entity logical name
-                const entityIdField = entityConfig?.entityLogicalName ? `${entityConfig.entityLogicalName}id` : `${entityName}id`
-                delete saveData[entityIdField]
-                delete saveData.createdon
-                delete saveData.modifiedon
-                delete saveData._createdby_value
-                delete saveData._modifiedby_value
-                delete saveData.statecode
-            }
+            // Prepare data for save - filter out system fields dynamically
+            console.log(`🔍 Full form data before filtering:`, formData)
+            const saveData = {}
+            Object.entries(formData).forEach(([key, value]) => {
+                if (!isSystemField(key)) {
+                    // Handle contact fields - only include the proper _value fields
+                    if (isContactField(key)) {
+                        // CRITICAL FIX: Skip the original 'cp_contact' field name, only send '_cp_contact_value'
+                        if (key === 'cp_contact') {
+                            console.log(`⚠️ SKIPPING form field name: ${key} (not a Dataverse field)`)
+                            return
+                        }
+                        
+                        // Only include _value lookup fields if they have values
+                        if (key.endsWith('_value') && value && value !== '' && value !== null && value !== undefined) {
+                            console.log(`✅ Including lookup contact field: ${key} = ${value}`)
+                            saveData[key] = value
+                        } else if (key.endsWith('_value')) {
+                            console.log(`⚠️ Skipping empty lookup contact field: ${key}`)
+                        } else {
+                            console.log(`⚠️ Skipping non-lookup contact field: ${key}`)
+                        }
+                        return
+                    }
+                    
+                    // Handle other lookup fields - skip if empty
+                    if (key.endsWith('_value') && (value === '' || value === null || value === undefined)) {
+                        console.log(`⚠️ Skipping empty lookup field: ${key}`)
+                        return
+                    }
+                    
+                    saveData[key] = value
+                }
+            })
+            
+            console.log(`📝 Filtered save data (removed ${Object.keys(formData).length - Object.keys(saveData).length} system fields):`, Object.keys(saveData))
 
             console.log(`💾 Saving ${entityName}:`, saveData)
+            
+            // Debug contact field specifically
+            Object.entries(saveData).forEach(([key, value]) => {
+                if (key.includes('contact')) {
+                    console.log(`🔍 Contact field debug: ${key} = ${value} (type: ${typeof value})`)
+                }
+            })
             
             // Debug rich text fields specifically
             Object.entries(saveData).forEach(([key, value]) => {
@@ -244,22 +441,47 @@ function EntityEdit() {
                 }
             })
 
+            // Log the complete request details
+            const requestBody = JSON.stringify(saveData)
+            console.log(`📡 ${method} Request Details:`)
+            console.log(`📡 URL: ${url}`)
+            console.log(`📡 Headers:`, {
+                'Authorization': `Bearer ${token ? '[TOKEN_PRESENT]' : '[NO_TOKEN]'}`,
+                'Content-Type': 'application/json'
+            })
+            console.log(`📡 Body (${requestBody.length} chars):`, requestBody)
+            console.log(`📡 Parsed Body:`, saveData)
+
             const response = await fetch(url, {
                 method: method,
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify(saveData)
+                body: requestBody
             })
 
+            // Log response details
+            console.log(`📥 Response Status: ${response.status} ${response.statusText}`)
+            console.log(`📥 Response Headers:`, Object.fromEntries([...response.headers]))
+
             if (!response.ok) {
-                const errorData = await response.json().catch(() => ({}))
-                throw new Error(errorData.error || `Failed to save ${entityName}`)
+                const errorText = await response.text()
+                console.log(`❌ Error Response Body:`, errorText)
+                
+                let errorData = {}
+                try {
+                    errorData = JSON.parse(errorText)
+                } catch (e) {
+                    console.log(`❌ Could not parse error as JSON:`, e.message)
+                    errorData = { error: errorText || `HTTP ${response.status}` }
+                }
+                
+                throw new Error(errorData.error || errorText || `Failed to save ${entityName}`)
             }
 
             const result = await response.json()
-            console.log(`✅ ${entityName} saved successfully`)
+            console.log(`✅ ${entityName} saved successfully:`, result)
 
             if (isCreateMode) {
                 // Navigate back to list with success message for new records
@@ -304,8 +526,17 @@ function EntityEdit() {
 
     const renderField = (field) => {
         const value = formData[field.datafieldname]
-        const entityIdField = entityConfig?.entityLogicalName ? `${entityConfig.entityLogicalName}id` : `${entityName}id`
-        const isDisabled = field.disabled || field.datafieldname === entityIdField || field.datafieldname === 'createdon' || field.datafieldname === 'modifiedon'
+        const fieldName = field.datafieldname
+        
+        // Hide system fields in create mode
+        if (isCreateMode && isSystemField(fieldName)) {
+            return null
+        }
+        
+        // Determine if field should be disabled
+        const isSystemFieldDisabled = isSystemField(fieldName)
+        const isContactFieldReadOnly = isContactField(fieldName) && (isCreateMode || !isEditing)
+        const isDisabled = field.disabled || isSystemFieldDisabled || isContactFieldReadOnly
         
         // In view mode, show read-only display
         if (!isEditing && !isCreateMode) {
@@ -394,20 +625,19 @@ function EntityEdit() {
                 )
 
             case 'lookup':
+                const lookupDisplayValue = getLookupDisplayValue(field.datafieldname, value, formData)
+                const isAutoPopulatedContact = isContactField(field.datafieldname) && isCreateMode && getCurrentUserContactGuid()
+                
                 return (
                     <div className="relative">
                         <input
                             type="text"
-                            value={getLookupDisplayValue(field.datafieldname, value, formData)}
+                            value={lookupDisplayValue}
                             disabled={true}
-                            className={`${baseClassName} bg-gray-50 text-gray-500 cursor-not-allowed`}
-                            placeholder="Lookup field (read-only)"
+                            className={`${baseClassName} ${isAutoPopulatedContact ? 'bg-blue-50 text-blue-700' : 'bg-gray-50 text-gray-500'} cursor-not-allowed`}
+                            placeholder={isAutoPopulatedContact ? "Auto-populated with your contact" : "Lookup field (read-only)"}
                         />
-                        <div className="absolute inset-y-0 right-0 flex items-center pr-3">
-                            <svg className="h-5 w-5 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
-                                <path fillRule="evenodd" d="M8 4a4 4 0 100 8 4 4 0 000-8zM2 8a6 6 0 1110.89 3.476l4.817 4.817a1 1 0 01-1.414 1.414l-4.816-4.816A6 6 0 012 8z" clipRule="evenodd" />
-                            </svg>
-                        </div>
+
                     </div>
                 )
 
@@ -496,6 +726,15 @@ function EntityEdit() {
 
     // Helper function to get display value for lookup fields
     const getLookupDisplayValue = (fieldName, value, entityData) => {
+        // Special handling for auto-populated contact fields in create mode
+        if (isCreateMode && isContactField(fieldName)) {
+            const currentContact = getCurrentUserContact()
+            if (currentContact) {
+                // Always show the user's name for contact fields in create mode, regardless of value
+                return currentContact.fullname || `${currentContact.firstname} ${currentContact.lastname}` || currentContact.emailaddress1 || 'Your Contact'
+            }
+        }
+        
         if (!value || !entityData) {
             return 'Not provided'
         }
@@ -684,6 +923,20 @@ function EntityEdit() {
                                                                     
                                                                     // CRITICAL FIX: Handle incorrectly configured contact fields
                                                                     if (field.datafieldname === 'cp_contact') {
+                                                                        console.log(`🔧 Converting field name: cp_contact → _cp_contact_value`)
+                                                                        console.log(`🔧 Current formData.cp_contact:`, formData['cp_contact'])
+                                                                        console.log(`� Current formData._cp_contact_value:`, formData['_cp_contact_value'])
+                                                                        
+                                                                        // PRESERVE THE VALUE during field conversion
+                                                                        const existingValue = formData['cp_contact'] || formData['_cp_contact_value']
+                                                                        if (existingValue && !formData['_cp_contact_value']) {
+                                                                            console.log(`🔧 PRESERVING contact value during conversion:`, existingValue)
+                                                                            setFormData(prev => ({
+                                                                                ...prev,
+                                                                                '_cp_contact_value': existingValue
+                                                                            }))
+                                                                        }
+                                                                        
                                                                         field.datafieldname = '_cp_contact_value'
                                                                         field.controlType = 'lookup'
                                                                         field.displayName = field.displayName || 'Contact'

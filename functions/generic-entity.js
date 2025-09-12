@@ -34,10 +34,15 @@ export const handler = async (event) => {
         }
     }
 
+    console.log(`🚀 GENERIC-ENTITY FUNCTION CALLED`)
+    console.log(`🚀 Method: ${event.httpMethod}`)
+    console.log(`🚀 Path: ${event.path}`)
+    console.log(`🚀 Query: ${JSON.stringify(event.queryStringParameters)}`)
+
     try {
         // Authenticate user (simple auth - no email required)
         const user = await validateSimpleAuth(event)
-        console.log(`Generic entity request from: ${user.userId}`)
+        console.log(`✅ Generic entity request from: ${user.userId}`)
 
         // Get entity name from query parameters
         const entitySlugOrName = event.queryStringParameters?.entity
@@ -196,6 +201,15 @@ async function handleListRequest(accessToken, entityConfig, userContact) {
         url += `&$expand=${expand}`
     }
 
+    // DEBUG: Log the complete OData query
+    console.log(`🔍 LIST REQUEST DEBUG:`)
+    console.log(`🔍 Entity: ${entityConfig.entityLogicalName}`)
+    console.log(`🔍 Entity Set: ${getEntitySetName(entityConfig.entityLogicalName)}`)
+    console.log(`🔍 Security Filter: ${securityFilter}`)
+    console.log(`🔍 Select: ${finalSelect}`)
+    console.log(`🔍 Expand: ${expand}`)
+    console.log(`🔍 Complete URL: ${url}`)
+
     const response = await fetch(url, {
         method: 'GET',
         headers: {
@@ -311,8 +325,24 @@ async function handleCreateRequest(accessToken, entityConfig, userContact, reque
 
     const data = JSON.parse(requestBody)
     
-    // Sanitize rich text fields for Dataverse compatibility
-    const sanitizedData = sanitizeDataForDataverse(data, entityConfig)
+    // Get form metadata to determine which fields are editable
+    let formMetadata = null
+    if (entityConfig.formGuid) {
+        console.log(`📋 Fetching form metadata for CREATE operation: ${entityConfig.formGuid}`)
+        try {
+            formMetadata = await getFormMetadata(accessToken, entityConfig.formGuid)
+            console.log(`✅ Form metadata loaded for CREATE: ${formMetadata.name}`)
+        } catch (error) {
+            console.error(`❌ Failed to load form metadata for CREATE: ${error.message}`)
+            console.warn(`🆘 CREATE will use fallback field processing without form metadata`)
+            formMetadata = null // Allow fallback processing
+        }
+    } else {
+        console.warn(`⚠️ Form GUID not configured for entity ${entityConfig.entityLogicalName} - using fallback processing`)
+    }
+    
+    // Sanitize rich text fields for Dataverse compatibility with form metadata
+    const sanitizedData = sanitizeDataForDataverse(data, entityConfig, formMetadata)
     
     // Add security field if configured
     if (entityConfig.contactRelationField && userContact && userContact._parentcustomerid_value) {
@@ -353,6 +383,18 @@ async function handleCreateRequest(accessToken, entityConfig, userContact, reque
         entityConfig: entityConfig,
         mode: 'create'
     })
+}
+
+/**
+ * Check if a field is a system field that shouldn't be edited
+ */
+function isSystemField(fieldName) {
+    const systemFields = [
+        'createdon', 'modifiedon', 'createdby', 'modifiedby',
+        '_createdby_value', '_modifiedby_value', '_ownerid_value',
+        'statecode', 'statuscode', 'versionnumber'
+    ]
+    return systemFields.includes(fieldName.toLowerCase()) || fieldName.endsWith('id')
 }
 
 /**
@@ -401,14 +443,40 @@ function sanitizeDataForDataverse(data, entityConfig, formMetadata = null) {
             }
         })
         
-        console.log(`📝 Found ${allFormFields.length} fields on form`)
+    console.log(`📝 Found ${allFormFields.length} fields on form`)
+    console.log(`📝 Incoming data keys:`, Object.keys(data))
+    console.log(`📝 Form fields found:`, allFormFields.map(f => ({ name: f.name, controlType: f.controlType })))
+    
+    if (allFormFields.length === 0) {
+        console.error(`❌ No fields found in form metadata - form structure may be incomplete`)
+        console.log(`📋 Full form metadata:`, JSON.stringify(formMetadata, null, 2))
+        // FALLBACK: Process all incoming data fields ending with _value as lookup fields
+        console.log(`🆘 FALLBACK: Processing data fields directly`)
+        Object.keys(data).forEach(fieldName => {
+            if (fieldName.endsWith('_value')) {
+                console.log(`🆘 FALLBACK LOOKUP PROCESSING: ${fieldName}`)
+                const lookupValue = data[fieldName]
+                if (lookupValue) {
+                    const navigationProperty = getNavigationPropertyForLookupField(fieldName)
+                    const entitySetName = getEntitySetNameForLookupField(fieldName)
+                    
+                    if (navigationProperty && entitySetName) {
+                        const odataBindKey = `${navigationProperty}@odata.bind`
+                        const odataBindValue = `/${entitySetName}(${lookupValue})`
+                        
+                        console.log(`🆘 FALLBACK CONVERSION: ${fieldName} → ${odataBindKey} = ${odataBindValue}`)
+                        editableData[odataBindKey] = odataBindValue
+                        console.log(`✅ FALLBACK CONVERSION COMPLETE`)
+                    }
+                }
+            } else if (!isSystemField(fieldName)) {
+                editableData[fieldName] = data[fieldName]
+                console.log(`🆘 FALLBACK: Including regular field: ${fieldName}`)
+            }
+        })
         
-        if (allFormFields.length === 0) {
-            console.error(`❌ No fields found in form metadata - form structure may be incomplete`)
-            console.log(`📋 Full form metadata:`, JSON.stringify(formMetadata, null, 2))
-        }
-        
-        allFormFields.forEach(field => {
+        return editableData
+    }        allFormFields.forEach(field => {
             const fieldName = field.name
             
             // Skip system read-only fields
@@ -420,9 +488,92 @@ function sanitizeDataForDataverse(data, entityConfig, formMetadata = null) {
                 return
             }
             
-            // Skip lookup fields (view only as per requirements)
-            if (field.controlType === 'lookup') {
-                console.log(`⏭️ Skipping lookup field (view only): ${fieldName}`)
+            // CRITICAL DEBUG: Log field details for lookup detection
+            console.log(`🔍 FIELD ANALYSIS: ${fieldName}`)
+            console.log(`🔍   controlType: "${field.controlType}"`)
+            console.log(`🔍   ends with _value: ${fieldName.endsWith('_value')}`)
+            console.log(`🔍   data has field: ${data.hasOwnProperty(fieldName)}`)
+            console.log(`🔍   data value: "${data[fieldName]}"`)
+            
+            // Handle lookup fields with proper Dataverse syntax - check both controlType and field name pattern
+            if (field.controlType === 'lookup' || fieldName.endsWith('_value')) {
+                console.log(`🎯 LOOKUP FIELD DETECTED: ${fieldName} (condition met)`);
+                if (data.hasOwnProperty(fieldName) && data[fieldName]) {
+                    // Convert lookup field to Dataverse @odata.bind format
+                    const lookupValue = data[fieldName]
+                    console.log(`🔗 Processing lookup field: ${fieldName} = ${lookupValue}`)
+                    
+                    // Skip empty lookup values (already handled in frontend)
+                    if (!lookupValue || lookupValue === '') {
+                        console.log(`⏭️ Skipping empty lookup field: ${fieldName}`)
+                        return
+                    }
+                    
+                    // Convert to navigation property format for Dataverse
+                    const navigationProperty = getNavigationPropertyForLookupField(fieldName)
+                    const entitySetName = getEntitySetNameForLookupField(fieldName)
+                    
+                    console.log(`🔍 LOOKUP CONVERSION DEBUG:`)
+                    console.log(`🔍   Input field: ${fieldName}`)
+                    console.log(`🔍   Input value: ${lookupValue}`)
+                    console.log(`🔍   Input value type: ${typeof lookupValue}`)
+                    console.log(`🔍   Navigation property: ${navigationProperty}`)
+                    console.log(`🔍   Entity set: ${entitySetName}`)
+                    
+                    if (navigationProperty && entitySetName) {
+                        const odataBindKey = `${navigationProperty}@odata.bind`
+                        const odataBindValue = `/${entitySetName}(${lookupValue})`
+                        
+                        console.log(`🚀 ODATA CONVERSION EXECUTING:`)
+                        console.log(`🚀   From: ${fieldName} = ${lookupValue}`)
+                        console.log(`🚀   To: ${odataBindKey} = ${odataBindValue}`)
+                        
+                        editableData[odataBindKey] = odataBindValue
+                        
+                        console.log(`✅ CONVERSION COMPLETE: Added to editableData`);
+                        console.log(`✅ LOOKUP CONVERTED SUCCESSFULLY:`)
+                        console.log(`✅   Original: ${fieldName} = ${lookupValue}`)
+                        console.log(`✅   Converted: ${odataBindKey} = ${odataBindValue}`)
+                        console.log(`✅   Expected pattern: "cp_Contact@odata.bind": "/contacts(12341234-1234-1234-1234-123412341234)"`)
+                        console.log(`✅   Matches WebAPI pattern: record["cp_Contact@odata.bind"] = "/contacts(guid)"`)
+                    } else {
+                        console.log(`❌ LOOKUP CONVERSION FAILED:`)
+                        console.log(`❌   Could not determine navigation property for: ${fieldName}`)
+                        console.log(`❌   Navigation property: ${navigationProperty}`)
+                        console.log(`❌   Entity set: ${entitySetName}`)
+                        console.log(`❌   Available mappings:`, Object.keys({
+                            '_cp_contact_value': 'cp_Contact',
+                            'cp_contact': 'cp_Contact'
+                        }))
+                    }
+                } else {
+                    console.log(`⏭️ Lookup field ${fieldName} not provided or empty - skipping`)
+                }
+                return
+            }
+            
+            // CRITICAL FIX: Check if this form field corresponds to a lookup field in the incoming data
+            // Form shows 'cp_contact' but data contains '_cp_contact_value'
+            const correspondingLookupField = `_${fieldName}_value`
+            if (data.hasOwnProperty(correspondingLookupField) && data[correspondingLookupField]) {
+                console.log(`🔧 LOOKUP FIELD MAPPING: Form field '${fieldName}' maps to data field '${correspondingLookupField}'`)
+                
+                const lookupValue = data[correspondingLookupField]
+                console.log(`🔗 Processing mapped lookup: ${correspondingLookupField} = ${lookupValue}`)
+                
+                // Convert to @odata.bind format using the actual lookup field name
+                const navigationProperty = getNavigationPropertyForLookupField(correspondingLookupField)
+                const entitySetName = getEntitySetNameForLookupField(correspondingLookupField)
+                
+                if (navigationProperty && entitySetName) {
+                    const odataBindKey = `${navigationProperty}@odata.bind`
+                    const odataBindValue = `/${entitySetName}(${lookupValue})`
+                    
+                    editableData[odataBindKey] = odataBindValue
+                    console.log(`✅ MAPPED LOOKUP CONVERSION: ${fieldName} (${correspondingLookupField}) → ${odataBindKey} = ${odataBindValue}`)
+                } else {
+                    console.error(`❌ Could not convert mapped lookup field: ${correspondingLookupField}`)
+                }
                 return
             }
             
@@ -444,8 +595,39 @@ function sanitizeDataForDataverse(data, entityConfig, formMetadata = null) {
             }
         })
     } else {
-        console.error(`❌ No form metadata available for ${entityConfig.entityLogicalName} - cannot determine editable fields`)
-        throw new Error(`Form metadata missing for ${entityConfig.entityLogicalName} - cannot determine editable fields`)
+        console.warn(`⚠️ No form metadata available for ${entityConfig.entityLogicalName} - using fallback processing`)
+        console.log(`🆘 FALLBACK MODE: Processing all incoming data fields directly`)
+        console.log(`📝 Incoming data keys:`, Object.keys(data))
+        
+        // FALLBACK: Process all incoming data fields directly
+        Object.keys(data).forEach(fieldName => {
+            if (fieldName.endsWith('_value')) {
+                console.log(`🆘 FALLBACK LOOKUP PROCESSING: ${fieldName}`)
+                const lookupValue = data[fieldName]
+                if (lookupValue) {
+                    const navigationProperty = getNavigationPropertyForLookupField(fieldName)
+                    const entitySetName = getEntitySetNameForLookupField(fieldName)
+                    
+                    if (navigationProperty && entitySetName) {
+                        const odataBindKey = `${navigationProperty}@odata.bind`
+                        const odataBindValue = `/${entitySetName}(${lookupValue})`
+                        
+                        console.log(`🆘 FALLBACK CONVERSION: ${fieldName} → ${odataBindKey} = ${odataBindValue}`)
+                        editableData[odataBindKey] = odataBindValue
+                        console.log(`✅ FALLBACK CONVERSION COMPLETE`)
+                    } else {
+                        console.error(`❌ Could not determine navigation property/entity set for: ${fieldName}`)
+                    }
+                } else {
+                    console.log(`⚠️ Empty lookup value for field: ${fieldName}`)
+                }
+            } else if (!isSystemField(fieldName)) {
+                editableData[fieldName] = data[fieldName]
+                console.log(`🆘 FALLBACK: Including regular field: ${fieldName}`)
+            } else {
+                console.log(`⏭️ FALLBACK: Skipping system field: ${fieldName}`)
+            }
+        })
     }
     
     console.log(`🧹 Final editable fields to update:`, Object.keys(editableData))
@@ -513,10 +695,11 @@ async function handleUpdateRequest(accessToken, entityConfig, userContact, entit
             console.log(`✅ Form metadata loaded: ${formMetadata.name}`)
         } catch (error) {
             console.error(`❌ Failed to load form metadata: ${error.message}`)
-            throw new Error(`Cannot determine editable fields - form metadata unavailable`)
+            console.warn(`🆘 UPDATE will use fallback field processing without form metadata`)
+            formMetadata = null // Allow fallback processing
         }
     } else {
-        throw new Error(`Form GUID not configured for entity ${entityConfig.entityLogicalName}`)
+        console.warn(`⚠️ Form GUID not configured for entity ${entityConfig.entityLogicalName} - using fallback processing`)
     }
     
     // Sanitize data based on form metadata
@@ -681,7 +864,7 @@ function getEntityFieldsWithLookups(entityConfig) {
         expands.push('_primarycontactid_value($select=fullname)')
     } else if (entityLogicalName === 'cp_idea') {
         fields.push('cp_name', 'cp_description', '_cp_contact_value')
-        // Use navigation property name, not field name
+        // Use correct PascalCase navigation property name
         expands.push('cp_Contact($select=fullname)', 'createdby($select=fullname)')
     }
     
@@ -763,7 +946,7 @@ function getFieldsFromViewMetadata(viewMetadata, entityConfig) {
             
             const result = {
                 select: fields.length > 0 ? fields.join(',') : 'cp_ideaid,cp_name,createdon',
-                expand: 'cp_Contact($select=fullname)'
+                expand: 'cp_Contact($select=fullname)'  // FIXED: Use PascalCase navigation property
             }
             
             return result
@@ -1362,4 +1545,90 @@ async function resolveEntityName(urlPathOrName, accessToken) {
         console.error('Error resolving entity name:', error)
         return null
     }
+}
+
+/**
+ * Convert lookup field name to navigation property name for Dataverse @odata.bind
+ * Maps field names like '_cp_contact_value' or 'cp_contact' to navigation properties like 'cp_Contact'
+ */
+function getNavigationPropertyForLookupField(fieldName) {
+    // Known lookup field mappings - FIXED: Use correct PascalCase navigation properties
+    const navigationPropertyMap = {
+        '_cp_contact_value': 'cp_Contact',  // FIXED: Correct PascalCase navigation property
+        'cp_contact': 'cp_Contact',         // FIXED: Correct PascalCase navigation property  
+        '_contactid_value': 'contactid', 
+        'contactid': 'contactid',
+        '_createdby_value': 'createdby',
+        '_modifiedby_value': 'modifiedby',
+        '_ownerid_value': 'ownerid',
+        '_parentcustomerid_value': 'parentcustomerid'
+    }
+    
+    // Check direct mapping first
+    if (navigationPropertyMap[fieldName]) {
+        return navigationPropertyMap[fieldName]
+    }
+    
+    // Try to auto-generate for custom lookup fields
+    // Pattern: _cp_entityname_value → cp_Entityname
+    const customLookupMatch = fieldName.match(/^_cp_(.+)_value$/)
+    if (customLookupMatch) {
+        const entityPart = customLookupMatch[1]
+        // Capitalize first letter: contact → Contact, organization → Organization
+        const capitalizedEntity = entityPart.charAt(0).toUpperCase() + entityPart.slice(1)
+        return `cp_${capitalizedEntity}`
+    }
+    
+    // Pattern: cp_entityname → cp_Entityname  
+    const customFieldMatch = fieldName.match(/^cp_(.+)$/)
+    if (customFieldMatch) {
+        const entityPart = customFieldMatch[1]
+        const capitalizedEntity = entityPart.charAt(0).toUpperCase() + entityPart.slice(1)
+        return `cp_${capitalizedEntity}`
+    }
+    
+    console.warn(`Could not determine navigation property for lookup field: ${fieldName}`)
+    return null
+}
+
+/**
+ * Get entity set name for lookup field to construct @odata.bind reference
+ * Maps field names to their target entity set names
+ */
+function getEntitySetNameForLookupField(fieldName) {
+    // Known entity set mappings - FIXED: Ensure contact lookups point to standard 'contacts' set
+    const entitySetMap = {
+        '_cp_contact_value': 'contacts',    // ✅ Standard contacts entity set
+        'cp_contact': 'contacts',           // ✅ Standard contacts entity set  
+        '_contactid_value': 'contacts',     // ✅ Standard contacts entity set
+        'contactid': 'contacts',            // ✅ Standard contacts entity set
+        '_createdby_value': 'systemusers',
+        '_modifiedby_value': 'systemusers', 
+        '_ownerid_value': 'systemusers',
+        '_parentcustomerid_value': 'accounts'
+    }
+    
+    // Check direct mapping first
+    if (entitySetMap[fieldName]) {
+        return entitySetMap[fieldName]
+    }
+    
+    // Try to auto-generate for custom lookup fields
+    // Pattern: _cp_entityname_value → cp_entitynames (pluralized)
+    const customLookupMatch = fieldName.match(/^_cp_(.+)_value$/)
+    if (customLookupMatch) {
+        const entityPart = customLookupMatch[1]
+        // Simple pluralization: contact → contacts, organization → organizations
+        return `cp_${entityPart}s`
+    }
+    
+    // Pattern: cp_entityname → cp_entitynames
+    const customFieldMatch = fieldName.match(/^cp_(.+)$/)
+    if (customFieldMatch) {
+        const entityPart = customFieldMatch[1]
+        return `cp_${entityPart}s`
+    }
+    
+    console.warn(`Could not determine entity set name for lookup field: ${fieldName}`)
+    return null
 }

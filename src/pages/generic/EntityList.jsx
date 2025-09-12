@@ -27,13 +27,17 @@ function EntityList() {
             return
         }
 
+        console.log(`🔥 FRONTEND: Starting fetchEntityList for ${entityName}`)
+
         try {
             setLoading(true)
             setError(null)
 
             const token = await getToken()
+            console.log(`🔥 FRONTEND: Got token: ${token ? 'YES' : 'NO'}`)
             
             const apiUrl = `/.netlify/functions/generic-entity?entity=${entityName}&mode=list`
+            console.log(`🔥 FRONTEND: Making request to: ${apiUrl}`)
             
             const response = await fetch(apiUrl, {
                 method: 'GET',
@@ -43,20 +47,24 @@ function EntityList() {
                 }
             })
 
+            console.log(`🔥 FRONTEND: Response status: ${response.status}`)
+            console.log(`🔥 FRONTEND: Response headers:`, Object.fromEntries([...response.headers]))
+
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({}))
-                console.error('API Error:', errorData)
+                console.error('🔥 FRONTEND: API Error:', errorData)
                 throw new Error(errorData.error || `Failed to fetch ${entityName} list: ${response.statusText}`)
             }
 
             const data = await response.json()
+            console.log(`🔥 FRONTEND: Success! Got data:`, data)
             
             setEntities(data.entities || [])
             setEntityConfig(data.entityConfig)
             setViewMetadata(data.viewMetadata)
 
         } catch (err) {
-            console.error(`Error fetching ${entityName} list:`, err)
+            console.error(`🔥 FRONTEND: Error fetching ${entityName} list:`, err)
             setError(err.message)
         } finally {
             setLoading(false)

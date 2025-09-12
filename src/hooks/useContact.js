@@ -1,11 +1,25 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useAuth } from '@clerk/clerk-react'
 
 export function useContact() {
-    const [contact, setContact] = useState(null)
+    const [contact, setContact] = useState(() => {
+        // Initialize from sessionStorage if available
+        const stored = sessionStorage.getItem('userContact')
+        return stored ? JSON.parse(stored) : null
+    })
     const [loading, setLoading] = useState(false)
     const [error, setError] = useState(null)
     const { getToken } = useAuth()
+
+    // Store contact in sessionStorage whenever it changes
+    useEffect(() => {
+        if (contact) {
+            sessionStorage.setItem('userContact', JSON.stringify(contact))
+            console.log('🚨 STORED USER CONTACT GUID:', contact.contactid)
+        } else {
+            sessionStorage.removeItem('userContact')
+        }
+    }, [contact])
 
     const fetchContactByEmail = async (email) => {
         if (!email) return
@@ -98,6 +112,26 @@ export function useContact() {
 
     const clearError = () => setError(null)
 
+    // Helper function to get just the contact GUID
+    const getContactGuid = () => {
+        return contact?.contactid || null
+    }
+
+    // Static helper to get contact GUID from sessionStorage without hook
+    const getCurrentUserContactGuid = () => {
+        const stored = sessionStorage.getItem('userContact')
+        if (stored) {
+            try {
+                const contact = JSON.parse(stored)
+                return contact.contactid || null
+            } catch (e) {
+                console.error('Error parsing stored contact:', e)
+                return null
+            }
+        }
+        return null
+    }
+
     return {
         contact,
         loading,
@@ -105,6 +139,8 @@ export function useContact() {
         fetchContactByEmail,
         saveContact,
         updateContact,
-        clearError
+        clearError,
+        getContactGuid,
+        getCurrentUserContactGuid
     }
 }
