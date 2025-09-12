@@ -632,7 +632,7 @@ function inferControlType(classid, fieldName) {
         return classidMap[classid]
     }
     
-    // Fallback to field name inference
+    // Use field name pattern inference when classid mapping unavailable
     return inferFieldType(fieldName)
 }
 

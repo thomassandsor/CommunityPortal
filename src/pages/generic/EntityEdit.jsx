@@ -73,14 +73,14 @@ function EntityEdit() {
                 setIsCreateMode(false)
                 console.log('📝 Edit mode - using selected entity:', selection.data)
             } else if (urlEntityId) {
-                // Fallback to URL-based entityId for backward compatibility
+                // URL-based entityId for direct links
                 setEntityId(urlEntityId)
                 setIsCreateMode(false)
                 console.log('📝 Edit mode - using URL entityId:', urlEntityId)
             } else {
-                // Fallback create mode (no selected entity or URL ID)
+                // Default to create mode when no entity context is available
                 setIsCreateMode(true)
-                console.log('🆕 Create mode - fallback (no selected entity or URL ID)')
+                console.log('🆕 Create mode - no entity context available')
             }
         }
         
@@ -101,7 +101,7 @@ function EntityEdit() {
             
             Promise.all(promises).then(([formMetadata, entityData]) => {
                 // Initialize form data immediately with both results
-                // For edit mode, prefer fresh data but fall back to selectedEntity
+                // For edit mode, prefer fresh data or use cached selectedEntity
                 const dataToUse = entityData || selectedEntity
                 initializeFormData(dataToUse, formMetadata)
                 
@@ -763,7 +763,7 @@ function EntityEdit() {
             }
         }
         
-        // Fallback: check for formatted value (Dataverse sometimes provides this)
+        // Check for Dataverse formatted value (standard OData annotation)
         const formattedValueKey = `${fieldName}@OData.Community.Display.V1.FormattedValue`
         if (entityData[formattedValueKey]) {
             return entityData[formattedValueKey]
@@ -971,7 +971,7 @@ function EntityEdit() {
                                                             return section.displayName
                                                         }
                                                         
-                                                        // Fallback to section name
+                                                        // Use section name when display name unavailable
                                                         return section.name || 'Section'
                                                     }
                                                     

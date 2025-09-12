@@ -325,21 +325,19 @@ async function handleCreateRequest(accessToken, entityConfig, userContact, reque
 
     const data = JSON.parse(requestBody)
     
-    // Get form metadata to determine which fields are editable
-    let formMetadata = null
-    if (entityConfig.formGuid) {
-        console.log(`📋 Fetching form metadata for CREATE operation: ${entityConfig.formGuid}`)
-        try {
-            formMetadata = await getFormMetadata(accessToken, entityConfig.formGuid)
-            console.log(`✅ Form metadata loaded for CREATE: ${formMetadata.name}`)
-        } catch (error) {
-            console.error(`❌ Failed to load form metadata for CREATE: ${error.message}`)
-            console.warn(`🆘 CREATE will use fallback field processing without form metadata`)
-            formMetadata = null // Allow fallback processing
-        }
-    } else {
-        console.warn(`⚠️ Form GUID not configured for entity ${entityConfig.entityLogicalName} - using fallback processing`)
+    // Get form metadata to determine which fields are editable - REQUIRED
+    if (!entityConfig.formGuid) {
+        throw new Error(`Form GUID is required for entity ${entityConfig.entityLogicalName} - no fallback processing allowed`)
     }
+    
+    console.log(`📋 Fetching form metadata for CREATE operation: ${entityConfig.formGuid}`)
+    const formMetadata = await getFormMetadata(accessToken, entityConfig.formGuid)
+    
+    if (!formMetadata) {
+        throw new Error(`Form metadata not found for GUID: ${entityConfig.formGuid}`)
+    }
+    
+    console.log(`✅ Form metadata loaded for CREATE: ${formMetadata.name}`)
     
     // Sanitize rich text fields for Dataverse compatibility with form metadata
     const sanitizedData = sanitizeDataForDataverse(data, entityConfig, formMetadata)
@@ -448,34 +446,9 @@ function sanitizeDataForDataverse(data, entityConfig, formMetadata = null) {
     console.log(`📝 Form fields found:`, allFormFields.map(f => ({ name: f.name, controlType: f.controlType })))
     
     if (allFormFields.length === 0) {
-        console.error(`❌ No fields found in form metadata - form structure may be incomplete`)
+        console.error(`❌ No fields found in form metadata - form structure is incomplete`)
         console.log(`📋 Full form metadata:`, JSON.stringify(formMetadata, null, 2))
-        // FALLBACK: Process all incoming data fields ending with _value as lookup fields
-        console.log(`🆘 FALLBACK: Processing data fields directly`)
-        Object.keys(data).forEach(fieldName => {
-            if (fieldName.endsWith('_value')) {
-                console.log(`🆘 FALLBACK LOOKUP PROCESSING: ${fieldName}`)
-                const lookupValue = data[fieldName]
-                if (lookupValue) {
-                    const navigationProperty = getNavigationPropertyForLookupField(fieldName)
-                    const entitySetName = getEntitySetNameForLookupField(fieldName)
-                    
-                    if (navigationProperty && entitySetName) {
-                        const odataBindKey = `${navigationProperty}@odata.bind`
-                        const odataBindValue = `/${entitySetName}(${lookupValue})`
-                        
-                        console.log(`🆘 FALLBACK CONVERSION: ${fieldName} → ${odataBindKey} = ${odataBindValue}`)
-                        editableData[odataBindKey] = odataBindValue
-                        console.log(`✅ FALLBACK CONVERSION COMPLETE`)
-                    }
-                }
-            } else if (!isSystemField(fieldName)) {
-                editableData[fieldName] = data[fieldName]
-                console.log(`🆘 FALLBACK: Including regular field: ${fieldName}`)
-            }
-        })
-        
-        return editableData
+        throw new Error(`Form metadata is incomplete - no fields found. Form GUID: ${entityConfig.formGuid}`)
     }        allFormFields.forEach(field => {
             const fieldName = field.name
             
@@ -594,41 +567,9 @@ function sanitizeDataForDataverse(data, entityConfig, formMetadata = null) {
                 console.log(`⚠️ Form field ${fieldName} not found in request data`)
             }
         })
-    } else {
-        console.warn(`⚠️ No form metadata available for ${entityConfig.entityLogicalName} - using fallback processing`)
-        console.log(`🆘 FALLBACK MODE: Processing all incoming data fields directly`)
-        console.log(`📝 Incoming data keys:`, Object.keys(data))
-        
-        // FALLBACK: Process all incoming data fields directly
-        Object.keys(data).forEach(fieldName => {
-            if (fieldName.endsWith('_value')) {
-                console.log(`🆘 FALLBACK LOOKUP PROCESSING: ${fieldName}`)
-                const lookupValue = data[fieldName]
-                if (lookupValue) {
-                    const navigationProperty = getNavigationPropertyForLookupField(fieldName)
-                    const entitySetName = getEntitySetNameForLookupField(fieldName)
-                    
-                    if (navigationProperty && entitySetName) {
-                        const odataBindKey = `${navigationProperty}@odata.bind`
-                        const odataBindValue = `/${entitySetName}(${lookupValue})`
-                        
-                        console.log(`🆘 FALLBACK CONVERSION: ${fieldName} → ${odataBindKey} = ${odataBindValue}`)
-                        editableData[odataBindKey] = odataBindValue
-                        console.log(`✅ FALLBACK CONVERSION COMPLETE`)
-                    } else {
-                        console.error(`❌ Could not determine navigation property/entity set for: ${fieldName}`)
-                    }
-                } else {
-                    console.log(`⚠️ Empty lookup value for field: ${fieldName}`)
-                }
-            } else if (!isSystemField(fieldName)) {
-                editableData[fieldName] = data[fieldName]
-                console.log(`🆘 FALLBACK: Including regular field: ${fieldName}`)
-            } else {
-                console.log(`⏭️ FALLBACK: Skipping system field: ${fieldName}`)
-            }
-        })
     }
+    
+    // Form metadata is required - no fallback processing allowed
     
     console.log(`🧹 Final editable fields to update:`, Object.keys(editableData))
     console.log(`🧹 Excluded from update:`, Object.keys(data).filter(key => !editableData.hasOwnProperty(key)))
@@ -686,21 +627,19 @@ async function handleUpdateRequest(accessToken, entityConfig, userContact, entit
     const data = JSON.parse(requestBody)
     console.log(`📊 Parsed data keys:`, Object.keys(data))
     
-    // Get form metadata to determine which fields are editable
-    let formMetadata = null
-    if (entityConfig.formGuid) {
-        console.log(`📋 Fetching form metadata for GUID: ${entityConfig.formGuid}`)
-        try {
-            formMetadata = await getFormMetadata(accessToken, entityConfig.formGuid)
-            console.log(`✅ Form metadata loaded: ${formMetadata.name}`)
-        } catch (error) {
-            console.error(`❌ Failed to load form metadata: ${error.message}`)
-            console.warn(`🆘 UPDATE will use fallback field processing without form metadata`)
-            formMetadata = null // Allow fallback processing
-        }
-    } else {
-        console.warn(`⚠️ Form GUID not configured for entity ${entityConfig.entityLogicalName} - using fallback processing`)
+    // Get form metadata to determine which fields are editable - REQUIRED
+    if (!entityConfig.formGuid) {
+        throw new Error(`Form GUID is required for entity ${entityConfig.entityLogicalName} - no fallback processing allowed`)
     }
+    
+    console.log(`📋 Fetching form metadata for GUID: ${entityConfig.formGuid}`)
+    const formMetadata = await getFormMetadata(accessToken, entityConfig.formGuid)
+    
+    if (!formMetadata) {
+        throw new Error(`Form metadata not found for GUID: ${entityConfig.formGuid}`)
+    }
+    
+    console.log(`✅ Form metadata loaded: ${formMetadata.name}`)
     
     // Sanitize data based on form metadata
     const sanitizedData = sanitizeDataForDataverse(data, entityConfig, formMetadata)

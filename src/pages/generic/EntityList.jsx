@@ -386,7 +386,7 @@ function EntityList() {
                     }
                 }
                 
-                // Fallback: if we have a value, show shortened GUID
+                // Display truncated GUID if no lookup display value available
                 if (value) {
                     return (
                         <span className="text-sm text-gray-600 bg-gray-100 px-2 py-1 rounded">
