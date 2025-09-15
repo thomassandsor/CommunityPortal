@@ -2,24 +2,28 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useUser, useAuth } from '@clerk/clerk-react'
 import DynamicSidebar from '../../components/shared/DynamicSidebar'
+import { useContact } from '../../hooks/useContact'
 
 function EntityList() {
     const { entityName } = useParams()
     const navigate = useNavigate()
     const { user, isLoaded } = useUser()
     const { getToken } = useAuth()
+    const { getCurrentUserContactGuid } = useContact()
     
     const [entities, setEntities] = useState([])
     const [entityConfig, setEntityConfig] = useState(null)
     const [viewMetadata, setViewMetadata] = useState(null)
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
+    const [viewMode, setViewMode] = useState('personal')
+    const [userIsAdmin, setUserIsAdmin] = useState(false)
 
     useEffect(() => {
         if (isLoaded && user && entityName) {
             fetchEntityList()
         }
-    }, [isLoaded, user, entityName])
+    }, [isLoaded, user, entityName, viewMode])
 
     const fetchEntityList = async () => {
         // Simple duplicate prevention - only if currently loading the same entity
@@ -36,7 +40,15 @@ function EntityList() {
             const token = await getToken()
             console.log(`🔥 FRONTEND: Got token: ${token ? 'YES' : 'NO'}`)
             
-            const apiUrl = `/.netlify/functions/generic-entity?entity=${entityName}&mode=list`
+            // SECURITY: Get Contact GUID for maximum security
+            const contactGuid = getCurrentUserContactGuid()
+            console.log(`🛡️ FRONTEND: Contact GUID: ${contactGuid ? 'YES' : 'NO'}`)
+            
+            if (!contactGuid) {
+                throw new Error('Contact GUID required for secure data access. Please refresh the page.')
+            }
+            
+            const apiUrl = `/.netlify/functions/generic-entity?entity=${entityName}&mode=list&contactGuid=${encodeURIComponent(contactGuid)}&viewMode=${viewMode}`
             console.log(`🔥 FRONTEND: Making request to: ${apiUrl}`)
             
             const response = await fetch(apiUrl, {
@@ -58,10 +70,17 @@ function EntityList() {
 
             const data = await response.json()
             console.log(`🔥 FRONTEND: Success! Got data:`, data)
+            console.log(`🔥 FRONTEND: Entities array:`, data.entities)
+            console.log(`🔥 FRONTEND: Entities count:`, data.entities?.length)
+            console.log(`🔥 FRONTEND: Entity Config:`, data.entityConfig)
+            console.log(`🔥 FRONTEND: Contact Relation Field:`, data.entityConfig?.contactRelationField)
             
             setEntities(data.entities || [])
             setEntityConfig(data.entityConfig)
             setViewMetadata(data.viewMetadata)
+            setUserIsAdmin(data.userIsAdmin || false)
+            
+            console.log(`🔍 FRONTEND: Admin Status from API:`, data.userIsAdmin)
 
         } catch (err) {
             console.error(`🔥 FRONTEND: Error fetching ${entityName} list:`, err)
@@ -104,17 +123,20 @@ function EntityList() {
             return `${entityName}id`
         }
         
-        // For display names like "Ideas", we need to map back to the logical name
-        const entityMappings = {
-            'Ideas': 'cp_ideaid',
-            'Contacts': 'contactid',
-            'Accounts': 'accountid'
+        // Generate ID field name dynamically based on entity configuration
+        if (entityConfig && entityConfig.entityLogicalName) {
+            return `${entityConfig.entityLogicalName}id`
         }
         
-        return entityMappings[entityName] || `${entityName.toLowerCase()}id`
+        // Fallback to generic pattern
+        return `${entityName.toLowerCase()}id`
     }
 
     const DynamicTable = ({ entityConfig, viewMetadata, data }) => {
+        console.log(`🔥 DYNAMIC TABLE: Received data:`, data)
+        console.log(`🔥 DYNAMIC TABLE: Data length:`, data?.length)
+        console.log(`🔥 DYNAMIC TABLE: Data is array:`, Array.isArray(data))
+        
         if (!data || data.length === 0) {
             return (
                 <div className="bg-white shadow rounded-lg">
@@ -151,31 +173,78 @@ function EntityList() {
         }
 
         // Use view metadata if available, otherwise infer columns from data
-        const columns = viewMetadata?.columns || inferColumnsFromData(data[0])
+        console.log(`🔥 COLUMNS: viewMetadata?.columns:`, viewMetadata?.columns)
+        console.log(`🔥 COLUMNS: data[0]:`, data[0])
+        const inferredColumns = inferColumnsFromData(data[0])
+        console.log(`🔥 COLUMNS: inferredColumns:`, inferredColumns)
+        const columns = viewMetadata?.columns || inferredColumns
+        console.log(`🔥 COLUMNS: final columns:`, columns)
+        console.log(`🔥 COLUMNS: column names:`, columns.map(c => c.name))
+        console.log(`🔥 COLUMNS: data[0] keys:`, Object.keys(data[0]))
+        console.log(`🔥 COLUMNS: column/data mismatch:`, columns.map(c => ({
+            column: c.name,
+            existsInData: data[0].hasOwnProperty(c.name),
+            dataValue: data[0][c.name]
+        })))
 
         return (
             <div className="bg-white shadow rounded-lg overflow-hidden">
                 {/* Table Header */}
                 <div className="px-6 py-4 border-b border-gray-200">
-                    <div className="flex justify-between items-center">
+                    <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-4">
                         <div>
                             <h3 className="text-lg font-medium text-gray-900">
                                 {entityConfig?.name || entityName}
                             </h3>
-                            <p className="mt-1 text-sm text-gray-600">
-                                {data.length} record{data.length !== 1 ? 's' : ''}
-                                {entityConfig?.description && ` • ${entityConfig.description}`}
-                            </p>
                         </div>
-                        <button
-                            onClick={handleCreate}
-                            className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700"
-                        >
-                            <svg className="-ml-1 mr-2 h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
-                                <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
-                            </svg>
-                            New {entityConfig?.name || entityName}
-                        </button>
+                        
+                        <div className="flex items-center space-x-3">
+                            {/* View Mode Selector - Only show for contact-owned entities with admin users */}
+                            {(() => {
+                                console.log('🔍 VIEW SELECTOR DEBUG:', {
+                                    entityConfigExists: !!entityConfig,
+                                    contactRelationField: entityConfig?.contactRelationField,
+                                    userIsAdminFromAPI: userIsAdmin,
+                                    shouldShowSelector: entityConfig?.contactRelationField && userIsAdmin
+                                })
+                                
+                                // Now use proper admin check from Dataverse
+                                return entityConfig?.contactRelationField && userIsAdmin && (
+                                    <div className="flex items-center space-x-2">
+                                        <label className="text-sm font-medium text-gray-700">View:</label>
+                                        <select
+                                            value={viewMode}
+                                            onChange={(e) => setViewMode(e.target.value)}
+                                            className="text-sm border border-gray-300 rounded-md px-3 py-1 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
+                                        >
+                                            <option value="personal">My Items</option>
+                                            <option value="organization">All Organization Items</option>
+                                        </select>
+                                    </div>
+                                )
+                            })()}
+                            
+                            <button
+                                onClick={handleRefresh}
+                                disabled={loading}
+                                className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-gray-600 hover:bg-gray-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-gray-500 disabled:opacity-50"
+                            >
+                                <svg className="-ml-1 mr-2 h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                                </svg>
+                                {loading ? 'Refreshing...' : 'Refresh'}
+                            </button>
+                            
+                            <button
+                                onClick={handleCreate}
+                                className="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                            >
+                                <svg className="-ml-1 mr-2 h-5 w-5" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fillRule="evenodd" d="M10 3a1 1 0 011 1v5h5a1 1 0 110 2h-5v5a1 1 0 11-2 0v-5H4a1 1 0 110-2h5V4a1 1 0 011-1z" clipRule="evenodd" />
+                                </svg>
+                                New {entityConfig?.name?.replace(/s$/, '') || entityName}
+                            </button>
+                        </div>
                     </div>
                 </div>
 
@@ -237,7 +306,34 @@ function EntityList() {
                                                 `}
                                                 title={entity[column.name] ? String(entity[column.name]) : ''}
                                             >
-                                                {formatCellValue(entity[column.name], column.type, entity, column.name)}
+                                                {/* Dynamic display for contact field */}
+                                                {(() => {
+                                                    // Check if this is the contact relation field - FIXED camelCase
+                                                    const configuredContactField = entityConfig?.contactRelationField || entityConfig?.cp_contactrelationfield
+                                                    if (column.name === configuredContactField) {
+                                                        const contactNavProperty = configuredContactField.replace(/^cp_([a-z])/, (match, letter) => `cp_${letter.toUpperCase()}`)
+                                                        
+                                                        console.log('🔍 Dynamic contact field debug:', {
+                                                            columnName: column.name,
+                                                            contactNavProperty: contactNavProperty,
+                                                            hasContact: !!entity[contactNavProperty],
+                                                            fullname: entity[contactNavProperty]?.fullname,
+                                                            entity: entity
+                                                        })
+                                                        
+                                                        // Show contact name if available
+                                                        if (entity[contactNavProperty]?.fullname) {
+                                                            return (
+                                                                <span className="text-sm text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                                                                    {entity[contactNavProperty].fullname}
+                                                                </span>
+                                                            )
+                                                        }
+                                                    }
+                                                    
+                                                    // Default cell formatting
+                                                    return formatCellValue(entity[column.name], column.type, entity, column.name)
+                                                })()}
                                             </td>
                                         ))}
 
@@ -325,7 +421,13 @@ function EntityList() {
             'modifiedon': 'Modified',
             '_parentcustomerid_value': 'Company',
             '_primarycontactid_value': 'Primary Contact',
-            '_cp_contact_value': 'Contact'
+        }
+        
+        // Add dynamic contact field display name if configured - FIXED camelCase
+        const configuredContactField = entityConfig?.contactRelationField || entityConfig?.cp_contactrelationfield
+        if (configuredContactField) {
+            const contactLookupField = `_${configuredContactField}_value`
+            displayNames[contactLookupField] = 'Contact'
         }
         
         return displayNames[fieldName] || 
@@ -338,8 +440,9 @@ function EntityList() {
         if (fieldName.includes('createdon') || fieldName.includes('modifiedon')) return 'datetime'
         if (fieldName.endsWith('_value')) return 'lookup'
         
-        // Special handling for known contact lookup fields
-        if (fieldName === 'cp_contact' || fieldName === entityConfig?.cp_contactrelationfield) {
+        // Special handling for known contact lookup fields - FIXED camelCase
+        const configuredContactField = entityConfig?.contactRelationField || entityConfig?.cp_contactrelationfield
+        if (fieldName === 'cp_contact' || fieldName === configuredContactField) {
             return 'lookup'
         }
         
@@ -349,17 +452,30 @@ function EntityList() {
     }
 
     const formatCellValue = (value, type, entity, columnName) => {
-        // Special handling for cp_contact column - use expanded contact data if available
-        if (columnName === 'cp_contact' && entity.cp_Contact && entity.cp_Contact.fullname) {
+        // Debug lookup field handling
+        if (columnName && columnName.includes('contact')) {
+            console.log(`🔍 LOOKUP DEBUG: columnName=${columnName}, value=${value}, type=${type}`)
+            console.log(`🔍 LOOKUP DEBUG: entity keys:`, Object.keys(entity))
+            console.log(`🔍 LOOKUP DEBUG: entity data:`, entity)
+            // Add visible alert to confirm function is called
+            console.log(`🚨 CONTACT FIELD PROCESSING: ${columnName} with type ${type}`)
+        }
+
+        // Dynamic handling for contact relation field - use expanded contact data if available - FIXED camelCase
+        const configuredContactField = entityConfig?.contactRelationField || entityConfig?.cp_contactrelationfield
+        const contactNavProperty = configuredContactField ? 
+            configuredContactField.replace(/^cp_([a-z])/, (match, letter) => `cp_${letter.toUpperCase()}`) : null
+        if (columnName === configuredContactField && contactNavProperty && 
+            entity[contactNavProperty] && entity[contactNavProperty].fullname) {
             return (
                 <span className="text-sm text-blue-600 bg-blue-50 px-2 py-1 rounded">
-                    {entity.cp_Contact.fullname}
+                    {entity[contactNavProperty].fullname}
                 </span>
             )
         }
 
         if (value === null || value === undefined || value === '') {
-            return <span className="text-gray-400">—</span>
+            return ''
         }
 
         switch (type) {
@@ -372,12 +488,44 @@ function EntityList() {
             case 'phone':
                 return <a href={`tel:${value}`} className="text-blue-600 hover:text-blue-800">{value}</a>
             case 'lookup':
-                // For other lookup fields, try to get the expanded data
-                if (columnName && columnName.endsWith('_value')) {
-                    const navProperty = columnName.replace(/^_/, '').replace(/_value$/, '')
-                    const expandedData = entity[navProperty]
+                console.log(`🔍 LOOKUP CASE: columnName=${columnName}, value=${value}`)
+                
+                // Dynamic handling based on entity configuration - FIXED camelCase field name
+                const configuredContactField = entityConfig?.contactRelationField || entityConfig?.cp_contactrelationfield
+                console.log(`🔍 LIST: Configured contact field:`, configuredContactField)
+                
+                if (columnName === configuredContactField) {
+                    console.log(`🚨 DYNAMIC CONTACT LOOKUP DETECTED! Entity:`, entity)
+                }
+                
+                // Map view column names to actual field names
+                let actualFieldName = columnName
+                let navigationProperty = null
+                
+                // Handle dynamic mappings for configured lookup fields
+                if (columnName === configuredContactField) {
+                    actualFieldName = `_${configuredContactField}_value`
+                    navigationProperty = configuredContactField ? 
+                        configuredContactField.replace(/^cp_([a-z])/, (match, letter) => `cp_${letter.toUpperCase()}`) : null
+                } else if (columnName.endsWith('_value')) {
+                    // For already converted _value fields
+                    actualFieldName = columnName
+                    navigationProperty = columnName.replace(/^_cp_([a-z])/, (match, prefix, letter) => `cp_${letter.toUpperCase()}`).replace(/_value$/, '')
+                }
+                
+                console.log(`🔍 LOOKUP MAPPING: ${columnName} -> field: ${actualFieldName}, nav: ${navigationProperty}`)
+                
+                // Get the actual field value from the entity
+                const actualValue = entity[actualFieldName]
+                console.log(`🔍 LOOKUP ACTUAL VALUE: ${actualValue}`)
+                
+                // Check if we have expanded navigation property data
+                if (navigationProperty && entity[navigationProperty]) {
+                    const expandedData = entity[navigationProperty]
+                    console.log(`🔍 LOOKUP EXPANDED DATA:`, expandedData)
                     
                     if (expandedData && expandedData.fullname) {
+                        console.log(`🔍 LOOKUP SUCCESS: Using ${navigationProperty}.fullname = ${expandedData.fullname}`)
                         return (
                             <span className="text-sm text-blue-600 bg-blue-50 px-2 py-1 rounded">
                                 {expandedData.fullname}
@@ -386,16 +534,47 @@ function EntityList() {
                     }
                 }
                 
+                // Fallback: For lookup fields that end with _value, try pattern matching
+                if (columnName && columnName.endsWith('_value') && !navigationProperty) {
+                    // Try different navigation property mappings (keeping existing patterns for compatibility)
+                    const patterns = [
+                        // Pattern 1: _cp_fieldname_value -> cp_Fieldname (proper case)
+                        columnName.replace(/^_cp_/, 'cp_').replace(/_value$/, '').replace(/^cp_/, 'cp_').replace(/^cp_([a-z])/, (match, letter) => 'cp_' + letter.toUpperCase()),
+                        // Pattern 2: _cp_fieldname_value -> cp_fieldname (lowercase)
+                        columnName.replace(/^_/, '').replace(/_value$/, ''),
+                        // Pattern 3: Include configured navigation property if available - FIXED camelCase
+                        configuredContactField ? 
+                            configuredContactField.replace(/^cp_([a-z])/, (match, letter) => `cp_${letter.toUpperCase()}`) : null
+                    ]
+                    
+                    console.log(`🔍 LOOKUP PATTERNS: trying patterns:`, patterns)
+                    
+                    for (const pattern of patterns) {
+                        const expandedData = entity[pattern]
+                        console.log(`🔍 LOOKUP PATTERN: ${pattern} -> ${expandedData ? 'FOUND' : 'NOT FOUND'}`)
+                        
+                        if (expandedData && expandedData.fullname) {
+                            console.log(`🔍 LOOKUP SUCCESS: Using ${pattern}.fullname = ${expandedData.fullname}`)
+                            return (
+                                <span className="text-sm text-blue-600 bg-blue-50 px-2 py-1 rounded">
+                                    {expandedData.fullname}
+                                </span>
+                            )
+                        }
+                    }
+                }
+                
                 // Display truncated GUID if no lookup display value available
-                if (value) {
+                const displayValue = actualValue || value
+                if (displayValue) {
                     return (
                         <span className="text-sm text-gray-600 bg-gray-100 px-2 py-1 rounded">
-                            {String(value).substring(0, 8)}...
+                            {String(displayValue).substring(0, 8)}...
                         </span>
                     )
                 }
                 
-                return <span className="text-gray-400">—</span>
+                return ''
             default:
                 const stringValue = String(value)
                 return stringValue.length > 50 ? stringValue.substring(0, 50) + '...' : stringValue
@@ -429,13 +608,6 @@ function EntityList() {
                             </p>
                         </div>
                         <div className="flex items-center space-x-4">
-                            <button
-                                onClick={handleRefresh}
-                                disabled={loading}
-                                className="bg-blue-600 text-white px-4 py-2 rounded-lg font-medium hover:bg-blue-700 transition-colors disabled:opacity-50"
-                            >
-                                {loading ? 'Loading...' : 'Refresh'}
-                            </button>
                             <button
                                 onClick={() => navigate('/welcome')}
                                 className="bg-gray-100 text-gray-700 px-4 py-2 rounded-lg font-medium hover:bg-gray-200 transition-colors border border-gray-300"
@@ -480,13 +652,19 @@ function EntityList() {
                             </div>
                         )}
 
+
+
                         {/* Success State - Dynamic Table */}
                         {!loading && !error && (
-                            <DynamicTable 
-                                entityConfig={entityConfig} 
-                                viewMetadata={viewMetadata} 
-                                data={entities} 
-                            />
+                            <>
+                                {console.log(`🔥 RENDER: Passing entities to DynamicTable:`, entities)}
+                                {console.log(`🔥 RENDER: Entities length:`, entities.length)}
+                                <DynamicTable 
+                                    entityConfig={entityConfig} 
+                                    viewMetadata={viewMetadata} 
+                                    data={entities} 
+                                />
+                            </>
                         )}
 
                         {/* Debug Info */}
@@ -503,7 +681,10 @@ function EntityList() {
                                         <div className="mt-2 text-sm text-blue-700 space-y-1">
                                             <p><strong>Entity:</strong> {entityConfig.entityLogicalName}</p>
                                             <p><strong>Records:</strong> {entities.length}</p>
-                                            <p><strong>Admin Required:</strong> {entityConfig.requiresAdmin ? 'Yes' : 'No'}</p>
+                                            <p><strong>View Mode:</strong> {viewMode === 'personal' ? 'My Items' : 'All Organization Items'}</p>
+                                            <p><strong>Admin User:</strong> {userIsAdmin ? 'Yes' : 'No'}</p>
+                                            <p><strong>Contact Field:</strong> {entityConfig.contactRelationField || 'None'}</p>
+                                            <p><strong>Account Field:</strong> {entityConfig.accountRelationField || 'None'}</p>
                                             {viewMetadata && <p><strong>View:</strong> {viewMetadata.name}</p>}
                                         </div>
                                     </div>

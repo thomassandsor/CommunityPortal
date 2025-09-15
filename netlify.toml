@@ -29,11 +29,7 @@
     X-Frame-Options = "DENY"
     Cache-Control = "no-store, no-cache, must-revalidate"
 
-# API functions should not be redirected
-[[redirects]]
-  from = "/.netlify/functions/*"
-  to = "/.netlify/functions/:splat"
-  status = 200
+# Functions are handled by Netlify automatically, no redirect needed
 
 # Static assets should not be redirected
 [[redirects]]

@@ -88,8 +88,7 @@ export const handler = async (event) => {
         }
 
         if (!userEmail) {
-            // Hardcode the known email since Sidebar shows: sandsor@gmail.com
-            userEmail = 'sandsor@gmail.com'
+            return createAuthErrorResponse('User email not found in authentication token - ensure proper Clerk configuration', 401)
         }
 
         // Add email to query parameters for validateUser

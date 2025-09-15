@@ -1,5 +1,5 @@
 /**
- * Netlify Function: generic-entity.js
+ * Netlify Function: generic-entity.js - v2.2 TESTING
  * 
  * Generic CRUD operations for any Dataverse entity based on configuration.
  * Provides unified API for entity operations with dynamic form/view metadata.
@@ -34,10 +34,18 @@ export const handler = async (event) => {
         }
     }
 
-    console.log(`🚀 GENERIC-ENTITY FUNCTION CALLED`)
+    console.log(`🚀 GENERIC-ENTITY FUNCTION CALLED v2`) // Fixed duplicate imports
     console.log(`🚀 Method: ${event.httpMethod}`)
     console.log(`🚀 Path: ${event.path}`)
     console.log(`🚀 Query: ${JSON.stringify(event.queryStringParameters)}`)
+    
+    // EARLY DEBUG: Check the contact GUID from query parameters
+    const contactGuidFromQuery = event.queryStringParameters?.contactGuid
+    if (contactGuidFromQuery) {
+        console.log(`🔍 EARLY DEBUG: Contact GUID from query: "${contactGuidFromQuery}"`)
+        console.log(`🔍 EARLY DEBUG: GUID length: ${contactGuidFromQuery.length}`)
+        console.log(`🔍 EARLY DEBUG: GUID segments: ${contactGuidFromQuery.split('-').map(s => s.length).join('-')}`)
+    }
 
     try {
         // Authenticate user (simple auth - no email required)
@@ -64,21 +72,66 @@ export const handler = async (event) => {
         }
 
         // Get entity configuration
+        console.log(`🔍 LOADING ENTITY CONFIG for: ${entityLogicalName}`)
         const entityConfig = await getEntityConfiguration(accessToken, entityLogicalName)
+        console.log(`🔍 ENTITY CONFIG RESULT:`, entityConfig)
+        
         if (!entityConfig) {
-            return createAuthErrorResponse('Entity configuration not found', 404)
+            console.error(`❌ ENTITY CONFIG NOT FOUND for: ${entityLogicalName}`)
+            return createAuthErrorResponse(`Entity configuration not found for ${entityLogicalName}. Please create a configuration record in cp_entityconfigurations table.`, 404)
+        }
+        
+        console.log(`✅ ENTITY CONFIG LOADED:`, {
+            name: entityConfig.name,
+            contactRelationField: entityConfig.contactRelationField,
+            accountRelationField: entityConfig.accountRelationField,
+            requiresAdmin: entityConfig.requiresAdmin
+        })
+
+        // SECURITY: Get contact GUID directly from request - MAXIMUM SECURITY APPROACH
+        let userContact = null
+        let contactGuid = null
+        
+        // Accept contact GUID from query params or request body
+        if (event.httpMethod === 'GET') {
+            contactGuid = event.queryStringParameters?.contactGuid
+        } else {
+            const requestBody = event.body ? JSON.parse(event.body) : {}
+            contactGuid = requestBody.contactGuid
+        }
+        
+        // Get view mode for filtering (personal vs organization)
+        const viewMode = event.queryStringParameters?.viewMode || 'personal'
+        
+        if (!contactGuid) {
+            console.error('🛡️ SECURITY VIOLATION: No contact GUID provided')
+            return createAuthErrorResponse('Contact GUID required for secure data access', 401)
+        }
+        
+        // Validate contact GUID format (Microsoft Dataverse GUID pattern)
+        console.log(`🔍 SECURITY: Validating Contact GUID: "${contactGuid}"`)
+        console.log(`🔍 SECURITY: GUID length: ${contactGuid.length}`)
+        console.log(`🔍 SECURITY: GUID segments: ${contactGuid.split('-').map(s => s.length).join('-')}`)
+        
+        const guidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+        const isValidGuid = guidPattern.test(contactGuid)
+        
+        console.log(`🔍 SECURITY: GUID validation result: ${isValidGuid}`)
+        
+        if (!isValidGuid) {
+            console.error(`🛡️ SECURITY VIOLATION: Invalid contact GUID format: ${contactGuid}`)
+            console.error(`🛡️ GUID pattern check: expected 8-4-4-4-12, got segments: ${contactGuid.split('-').map(s => s.length).join('-')}`)
+            return createAuthErrorResponse('Invalid contact GUID format', 401)
+        }
+        
+        // Verify the contact exists in Dataverse
+        userContact = await getUserContactByGuid(accessToken, contactGuid)
+        if (!userContact || !userContact.contactid) {
+            console.error(`🛡️ SECURITY VIOLATION: No contact record found for GUID: ${contactGuid}`)
+            return createAuthErrorResponse('Contact record not found or invalid', 403)
         }
 
-        // Get user contact for security filtering (if email is available)
-        let userContact = null
-        if (user.userEmail) {
-            userContact = await getUserContact(accessToken, user.userEmail)
-            if (!userContact) {
-                console.warn(`User contact not found for email: ${user.userEmail}`)
-            }
-        } else {
-            console.warn('No email available in token for user contact lookup')
-        }
+        console.log(`🛡️ SECURITY: User verified - Contact ID: ${userContact.contactid}`)
 
         // Check admin permissions if required
         if (entityConfig.requiresAdmin && (!userContact || !userContact.cp_portaladmin)) {
@@ -92,13 +145,13 @@ export const handler = async (event) => {
         switch (event.httpMethod) {
             case 'GET':
                 if (mode === 'list') {
-                    return await handleListRequest(accessToken, entityConfig, userContact)
+                    return await handleListRequest(accessToken, entityConfig, userContact, viewMode)
                 } else if (mode === 'form') {
                     return await handleFormMetadataRequest(accessToken, entityConfig, userContact)
                 } else if (entityId) {
                     return await handleSingleEntityRequest(accessToken, entityConfig, userContact, entityId)
                 } else {
-                    return await handleListRequest(accessToken, entityConfig, userContact)
+                    return await handleListRequest(accessToken, entityConfig, userContact, viewMode)
                 }
 
             case 'POST':
@@ -168,7 +221,7 @@ async function getEntityMetadata(accessToken, entityLogicalName) {
 /**
  * Handle list request - get entities with view metadata
  */
-async function handleListRequest(accessToken, entityConfig, userContact) {
+async function handleListRequest(accessToken, entityConfig, userContact, viewMode = 'personal') {
     const { DATAVERSE_URL } = process.env
     
     // Get view metadata if available
@@ -178,10 +231,10 @@ async function handleListRequest(accessToken, entityConfig, userContact) {
     }
     
     // Build security filter
-    const securityFilter = buildEntitySecurityFilter(entityConfig, userContact)
+    const securityFilter = await buildEntitySecurityFilter(accessToken, entityConfig, userContact, viewMode)
     
     // Build query based on view or default fields
-    const viewFieldInfo = viewMetadata ? getFieldsFromViewMetadata(viewMetadata, entityConfig) : null
+    const viewFieldInfo = viewMetadata ? await getFieldsFromViewMetadata(viewMetadata, entityConfig) : null
     const select = viewFieldInfo?.select || getDefaultEntityFields(entityConfig.entityLogicalName)
     const expand = viewFieldInfo?.expand
     
@@ -229,12 +282,25 @@ async function handleListRequest(accessToken, entityConfig, userContact) {
     const data = await response.json()
     const entities = data.value || []
 
+    console.log(`✅ Successfully retrieved ${entities.length} entities`)
+    console.log(`🔍 SAMPLE ENTITY DATA:`, entities[0])
+    console.log(`🔍 ENTITY KEYS:`, entities.length > 0 ? Object.keys(entities[0]) : 'No entities')
+    
+    // Check for expanded contact data using dynamic navigation property
+    if (entities.length > 0 && entityConfig?.contactRelationField) {
+        const contactNavProperty = getContactNavigationProperty(entityConfig.contactRelationField)
+        if (contactNavProperty && entities[0][contactNavProperty]) {
+            console.log(`🔍 EXPANDED CONTACT DATA (${contactNavProperty}):`, entities[0][contactNavProperty])
+        }
+    }
+
     return createSuccessResponse({
         entities: entities,
         entityConfig: entityConfig,
         viewMetadata: viewMetadata,
         totalCount: entities.length,
-        mode: 'list'
+        mode: 'list',
+        userIsAdmin: !!userContact?.cp_portaladmin
     })
 }
 
@@ -258,27 +324,102 @@ async function handleFormMetadataRequest(accessToken, entityConfig, userContact)
 }
 
 /**
- * Handle single entity request
+ * Handle single entity request - ENHANCED USER SCOPING
  */
 async function handleSingleEntityRequest(accessToken, entityConfig, userContact, entityId) {
-    console.log(`🔍 Fetching single ${entityConfig.entityLogicalName}: ${entityId}`)
+    console.log(`🔍 Fetching single ${entityConfig.entityLogicalName}: ${entityId} for user: ${userContact.contactid}`)
     
     const { DATAVERSE_URL } = process.env
     
-    // Build security filter
-    const securityFilter = buildEntitySecurityFilter(entityConfig, userContact)
+    // SECURITY ENHANCEMENT: Build mandatory user-scoped security filter
+    const securityFilter = await buildEntitySecurityFilter(accessToken, entityConfig, userContact, 'personal')
     const idField = getEntityIdField(entityConfig.entityLogicalName)
-    const filter = `${idField} eq '${entityId}' and ${securityFilter}`
+    const filter = `${idField} eq '${entityId}' and (${securityFilter})`
     
-    // Get all fields for editing with lookup expansions
-    const { select, expand } = getEntityFieldsWithLookups(entityConfig)
+    console.log(`🛡️ SECURITY: Single entity filter - ${filter}`)
+    
+    // ENHANCED: For edit view, we need ALL fields (not just view fields) plus lookup expansions
+    // Start with all entity fields including system date fields
+    const allFields = getAllEntityFields(entityConfig.entityLogicalName).split(',')
+    console.log(`🔍 SINGLE ENTITY: Starting with all fields: ${allFields.join(', ')}`)
+    
+    // Add dynamic fields from entity configuration
+    if (entityConfig.cp_keyfields) {
+        const keyFields = Array.isArray(entityConfig.cp_keyfields) ? 
+            entityConfig.cp_keyfields : 
+            entityConfig.cp_keyfields.split(',').map(f => f.trim())
+        
+        keyFields.forEach(field => {
+            if (!allFields.includes(field)) {
+                allFields.push(field)
+                console.log(`🔍 SINGLE ENTITY: Added key field: ${field}`)
+            }
+        })
+    }
+    
+    // Get lookup expansions using smart query building for consistency
+    let expand = null
+    let viewMetadata = null
+    
+    if (entityConfig.viewMainGuid) {
+        try {
+            viewMetadata = await getViewMetadata(accessToken, entityConfig.viewMainGuid)
+            console.log(`📋 Got view metadata for lookup expansions: ${viewMetadata?.name}`)
+            
+            // Use smart query building ONLY for lookup expansions
+            const queryResult = await buildSmartQueryFromMetadata(viewMetadata, entityConfig)
+            expand = queryResult.expand
+            console.log(`🎯 SINGLE ENTITY: Using smart expansions: ${expand}`)
+            
+            // Also add any fields from view that aren't already included
+            if (queryResult.select) {
+                const viewFields = queryResult.select.split(',')
+                viewFields.forEach(field => {
+                    const trimmedField = field.trim()
+                    if (!allFields.includes(trimmedField)) {
+                        allFields.push(trimmedField)
+                        console.log(`🔍 SINGLE ENTITY: Added view field: ${trimmedField}`)
+                    }
+                })
+            }
+        } catch (error) {
+            console.warn('Could not fetch view metadata for single entity:', error.message)
+        }
+    }
+    
+    // Add contact lookup field and expansion if configured
+    if (entityConfig.contactRelationField) {
+        const contactFieldName = `_${entityConfig.contactRelationField}_value`
+        const contactNavProperty = getContactNavigationProperty(entityConfig.contactRelationField)
+        
+        if (!allFields.includes(contactFieldName)) {
+            allFields.push(contactFieldName)
+            console.log(`🔍 SINGLE ENTITY: Added contact field: ${contactFieldName}`)
+        }
+        
+        if (contactNavProperty) {
+            const contactExpansion = `${contactNavProperty}($select=fullname)`
+            if (expand) {
+                if (!expand.includes(contactExpansion)) {
+                    expand += `,${contactExpansion}`
+                }
+            } else {
+                expand = contactExpansion
+            }
+            console.log(`🔍 SINGLE ENTITY: Added contact expansion: ${contactExpansion}`)
+        }
+    }
+    
+    const select = allFields.join(',')
+    console.log(`🎯 SINGLE ENTITY: Final select with ALL fields: ${select}`)
+    console.log(`🎯 SINGLE ENTITY: Final expand: ${expand}`)
     
     let url = `${DATAVERSE_URL}/api/data/v9.2/${getEntitySetName(entityConfig.entityLogicalName)}?$filter=${encodeURIComponent(filter)}&$select=${select}`
     if (expand) {
         url += `&$expand=${encodeURIComponent(expand)}`
     }
     
-    console.log(`🔍 Single entity URL with lookups: ${url}`)
+    console.log(`🔍 SINGLE ENTITY: Complete URL: ${url}`)
     
     const response = await fetch(url, {
         method: 'GET',
@@ -304,7 +445,20 @@ async function handleSingleEntityRequest(accessToken, entityConfig, userContact,
         throw new Error('Entity not found or access denied')
     }
 
-    console.log(`✅ Retrieved ${entityConfig.entityLogicalName}: ${entityId}`)
+    console.log(`✅ SINGLE ENTITY: Retrieved ${entityConfig.entityLogicalName}: ${entityId}`)
+    console.log(`🔍 SINGLE ENTITY DATA:`, entity)
+    console.log(`🔍 SINGLE ENTITY KEYS:`, Object.keys(entity))
+    
+    // Debug expanded contact data for single entity like we do for list
+    if (entityConfig?.contactRelationField) {
+        const contactNavProperty = getContactNavigationProperty(entityConfig.contactRelationField)
+        if (contactNavProperty && entity[contactNavProperty]) {
+            console.log(`🔍 SINGLE ENTITY EXPANDED CONTACT DATA (${contactNavProperty}):`, entity[contactNavProperty])
+        } else {
+            console.log(`⚠️ SINGLE ENTITY: No expanded contact data found for nav property: ${contactNavProperty}`)
+            console.log(`⚠️ SINGLE ENTITY: Available nav properties:`, Object.keys(entity).filter(k => k.match(/^[a-z]/i) && !k.includes('@')))
+        }
+    }
 
     return createSuccessResponse({
         entity: entity,
@@ -342,9 +496,18 @@ async function handleCreateRequest(accessToken, entityConfig, userContact, reque
     // Sanitize rich text fields for Dataverse compatibility with form metadata
     const sanitizedData = sanitizeDataForDataverse(data, entityConfig, formMetadata)
     
-    // Add security field if configured
-    if (entityConfig.contactRelationField && userContact && userContact._parentcustomerid_value) {
-        sanitizedData[entityConfig.contactRelationField] = userContact._parentcustomerid_value
+    // SECURITY: Always set user ownership - contact GUID is guaranteed at this point
+    if (entityConfig.contactRelationField) {
+        // Standard user entity - set contact ownership
+        const contactBindField = `${entityConfig.contactRelationField}@odata.bind`
+        sanitizedData[contactBindField] = `/contacts(${userContact.contactid})`
+        console.log(`🛡️ SECURITY: User ownership set - ${contactBindField} = /contacts(${userContact.contactid})`)
+    } else if (!userContact.cp_portaladmin) {
+        // System entity requires admin access
+        throw new Error('Admin access required to create this type of record')
+    } else {
+        // Admin creating system entity
+        console.log(`🛡️ SECURITY: Admin creating system entity ${entityConfig.entityLogicalName}`)
     }
 
     const { DATAVERSE_URL } = process.env
@@ -483,7 +646,7 @@ function sanitizeDataForDataverse(data, entityConfig, formMetadata = null) {
                     }
                     
                     // Convert to navigation property format for Dataverse
-                    const navigationProperty = getNavigationPropertyForLookupField(fieldName)
+                    const navigationProperty = getNavigationPropertyForLookupField(fieldName, entityConfig)
                     const entitySetName = getEntitySetNameForLookupField(fieldName)
                     
                     console.log(`🔍 LOOKUP CONVERSION DEBUG:`)
@@ -514,10 +677,7 @@ function sanitizeDataForDataverse(data, entityConfig, formMetadata = null) {
                         console.log(`❌   Could not determine navigation property for: ${fieldName}`)
                         console.log(`❌   Navigation property: ${navigationProperty}`)
                         console.log(`❌   Entity set: ${entitySetName}`)
-                        console.log(`❌   Available mappings:`, Object.keys({
-                            '_cp_contact_value': 'cp_Contact',
-                            'cp_contact': 'cp_Contact'
-                        }))
+                        console.log(`❌   Available mappings:`, Object.keys(getFieldNavigationPropertyMap(entityConfig)))
                     }
                 } else {
                     console.log(`⏭️ Lookup field ${fieldName} not provided or empty - skipping`)
@@ -535,7 +695,7 @@ function sanitizeDataForDataverse(data, entityConfig, formMetadata = null) {
                 console.log(`🔗 Processing mapped lookup: ${correspondingLookupField} = ${lookupValue}`)
                 
                 // Convert to @odata.bind format using the actual lookup field name
-                const navigationProperty = getNavigationPropertyForLookupField(correspondingLookupField)
+                const navigationProperty = getNavigationPropertyForLookupField(correspondingLookupField, entityConfig)
                 const entitySetName = getEntitySetNameForLookupField(correspondingLookupField)
                 
                 if (navigationProperty && entitySetName) {
@@ -627,6 +787,40 @@ async function handleUpdateRequest(accessToken, entityConfig, userContact, entit
     const data = JSON.parse(requestBody)
     console.log(`📊 Parsed data keys:`, Object.keys(data))
     
+    // SECURITY ENHANCEMENT: Verify user owns the record before update (when contact available)
+    if (entityConfig.contactRelationField && userContact && userContact.contactid) {
+        const securityFilter = await buildEntitySecurityFilter(accessToken, entityConfig, userContact, 'personal')
+        const idField = getEntityIdField(entityConfig.entityLogicalName)
+        const verifyFilter = `${idField} eq '${entityId}' and (${securityFilter})`
+        
+        console.log(`🛡️ SECURITY: Verifying user ownership before update - ${verifyFilter}`)
+        
+        const verifyUrl = `${DATAVERSE_URL}/api/data/v9.2/${getEntitySetName(entityConfig.entityLogicalName)}?$filter=${encodeURIComponent(verifyFilter)}&$select=${idField}`
+        const verifyResponse = await fetch(verifyUrl, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'OData-MaxVersion': '4.0',
+                'OData-Version': '4.0',
+                'Accept': 'application/json',
+            },
+        })
+        
+        if (!verifyResponse.ok) {
+            throw new Error(`Failed to verify record ownership: ${verifyResponse.status}`)
+        }
+        
+        const verifyData = await verifyResponse.json()
+        if (!verifyData.value || verifyData.value.length === 0) {
+            console.error(`🛡️ SECURITY: User ${userContact.contactid} attempted to update record ${entityId} they don't own`)
+            throw new Error('Access denied: You can only update records you own')
+        }
+        
+        console.log(`✅ SECURITY: User ownership verified for update operation`)
+    } else {
+        console.warn(`🛡️ SECURITY: Updating ${entityConfig.entityLogicalName} without ownership verification (no contact or no contact relation field)`)
+    }
+    
     // Get form metadata to determine which fields are editable - REQUIRED
     if (!entityConfig.formGuid) {
         throw new Error(`Form GUID is required for entity ${entityConfig.entityLogicalName} - no fallback processing allowed`)
@@ -678,12 +872,47 @@ async function handleUpdateRequest(accessToken, entityConfig, userContact, entit
 }
 
 /**
- * Handle delete request
+ * Handle delete request - ENHANCED USER SCOPING
  */
 async function handleDeleteRequest(accessToken, entityConfig, userContact, entityId) {
-    console.log(`🗑️ Deleting ${entityConfig.entityLogicalName}: ${entityId}`)
+    console.log(`🗑️ Deleting ${entityConfig.entityLogicalName}: ${entityId} for user: ${userContact.contactid}`)
     
     const { DATAVERSE_URL } = process.env
+    
+    // SECURITY ENHANCEMENT: Verify user owns the record before delete (when contact available)
+    if (entityConfig.contactRelationField && userContact && userContact.contactid) {
+        const securityFilter = await buildEntitySecurityFilter(accessToken, entityConfig, userContact, 'personal')
+        const idField = getEntityIdField(entityConfig.entityLogicalName)
+        const verifyFilter = `${idField} eq '${entityId}' and (${securityFilter})`
+        
+        console.log(`🛡️ SECURITY: Verifying user ownership before delete - ${verifyFilter}`)
+        
+        const verifyUrl = `${DATAVERSE_URL}/api/data/v9.2/${getEntitySetName(entityConfig.entityLogicalName)}?$filter=${encodeURIComponent(verifyFilter)}&$select=${idField}`
+        const verifyResponse = await fetch(verifyUrl, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'OData-MaxVersion': '4.0',
+                'OData-Version': '4.0',
+                'Accept': 'application/json',
+            },
+        })
+        
+        if (!verifyResponse.ok) {
+            throw new Error(`Failed to verify record ownership: ${verifyResponse.status}`)
+        }
+        
+        const verifyData = await verifyResponse.json()
+        if (!verifyData.value || verifyData.value.length === 0) {
+            console.error(`🛡️ SECURITY: User ${userContact.contactid} attempted to delete record ${entityId} they don't own`)
+            throw new Error('Access denied: You can only delete records you own')
+        }
+        
+        console.log(`✅ SECURITY: User ownership verified for delete operation`)
+    } else {
+        console.warn(`🛡️ SECURITY: Deleting ${entityConfig.entityLogicalName} without ownership verification (no contact or no contact relation field)`)
+    }
+    
     const url = `${DATAVERSE_URL}/api/data/v9.0/${getEntitySetName(entityConfig.entityLogicalName)}(${entityId})`
     
     const response = await fetch(url, {
@@ -711,15 +940,107 @@ async function handleDeleteRequest(accessToken, entityConfig, userContact, entit
 }
 
 /**
- * Build security filter for entity access
+ * Get all contact IDs for the user's account (for organization view)
+ * @param {string} accessToken - Dataverse access token
+ * @param {string} accountGuid - Account GUID
+ * @returns {Promise<string[]>} Array of contact GUIDs
  */
-function buildEntitySecurityFilter(entityConfig, userContact) {
+async function getAccountContactIds(accessToken, accountGuid) {
+    const { DATAVERSE_URL } = process.env
+    
+    const filter = `_parentcustomerid_value eq '${accountGuid}' and statecode eq 0`
+    const select = 'contactid'
+    const url = `${DATAVERSE_URL}/api/data/v9.0/contacts?$filter=${encodeURIComponent(filter)}&$select=${select}`
+    
+    try {
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'OData-MaxVersion': '4.0',
+                'OData-Version': '4.0',
+                'Accept': 'application/json',
+            },
+        })
+        
+        if (!response.ok) {
+            console.error(`Failed to fetch account contacts: ${response.status}`)
+            return []
+        }
+        
+        const data = await response.json()
+        const contactIds = data.value.map(contact => contact.contactid)
+        console.log(`🏢 ACCOUNT CONTACTS: Found ${contactIds.length} contacts in account ${accountGuid}`)
+        return contactIds
+        
+    } catch (error) {
+        console.error('Error fetching account contacts:', error)
+        return []
+    }
+}
+
+/**
+ * Build security filter for entity access - SECURE CONTACT-BASED FILTERING
+ * NO FALLBACKS - FAILS SECURELY
+ */
+async function buildEntitySecurityFilter(accessToken, entityConfig, userContact, viewMode = 'personal') {
+    // SECURITY: Contact GUID is REQUIRED - no exceptions, no fallbacks
+    if (!userContact || !userContact.contactid) {
+        throw new Error('🛡️ SECURITY: Contact GUID required for all data access')
+    }
+
     let filter = 'statecode eq 0' // Only active records
     
-    // Use the configured contact relation field from entity config
-    if (entityConfig.contactRelationField && userContact && userContact.contactid) {
+    // SECURITY: Apply user scoping based on entity configuration
+    if (entityConfig.contactRelationField) {
+        // PATTERN 1: Contact-owned entities (Ideas, Projects, Cases)
         const contactField = `_${entityConfig.contactRelationField}_value`
-        filter += ` and ${contactField} eq ${userContact.contactid}`
+        
+        if (viewMode === 'organization' && userContact.cp_portaladmin && userContact._parentcustomerid_value) {
+            // ADMIN ORGANIZATION VIEW: Show all records from contacts in the same account
+            console.log(`🏢 SECURITY: Admin organization view requested for account: ${userContact._parentcustomerid_value}`)
+            
+            // Get all contact IDs in the same account
+            const accountContactIds = await getAccountContactIds(accessToken, userContact._parentcustomerid_value)
+            
+            if (accountContactIds.length > 0) {
+                // Build filter for multiple contacts: field eq 'id1' or field eq 'id2' or...
+                const contactFilters = accountContactIds.map(contactId => `${contactField} eq '${contactId}'`).join(' or ')
+                filter += ` and (${contactFilters})`
+                console.log(`🏢 SECURITY: Organization view - filtering by ${accountContactIds.length} account contacts`)
+            } else {
+                // No contacts found, fall back to personal view
+                console.warn('⚠️  ORGANIZATION VIEW: No account contacts found, falling back to personal view')
+                filter += ` and ${contactField} eq '${userContact.contactid}'`
+            }
+        } else {
+            // PERSONAL VIEW: Show only user's own records
+            filter += ` and ${contactField} eq '${userContact.contactid}'`
+            console.log(`🛡️ SECURITY: Personal view - ${contactField} eq ${userContact.contactid}`)
+        }
+    } else if (entityConfig.accountRelationField) {
+        // PATTERN 2: Account-owned entities (Organization, Company Settings)
+        const accountField = `_${entityConfig.accountRelationField}_value`
+        
+        if (!userContact._parentcustomerid_value) {
+            throw new Error('🛡️ SECURITY: User must have account association for account-level entities')
+        }
+        
+        filter += ` and ${accountField} eq '${userContact._parentcustomerid_value}'`
+        console.log(`🏢 SECURITY: Account scoped - ${accountField} eq ${userContact._parentcustomerid_value}`)
+        
+        // Account-level entities typically require admin access
+        if (entityConfig.requiresAdmin && !userContact.cp_portaladmin) {
+            console.error(`🛡️ SECURITY VIOLATION: Non-admin user attempted access to admin entity ${entityConfig.entityLogicalName}`)
+            throw new Error('Admin access required for this entity type')
+        }
+    } else {
+        // PATTERN 3: System/admin entities - require admin permission
+        if (!userContact.cp_portaladmin) {
+            console.error(`🛡️ SECURITY VIOLATION: Non-admin user attempted access to admin entity ${entityConfig.entityLogicalName}`)
+            throw new Error('Admin access required for this entity type')
+        }
+        console.log(`🛡️ SECURITY: Admin access granted for ${entityConfig.entityLogicalName}`)
     }
     
     return filter
@@ -801,10 +1122,28 @@ function getEntityFieldsWithLookups(entityConfig) {
     } else if (entityLogicalName === 'account') {
         fields.push('name', 'telephone1', 'emailaddress1', '_primarycontactid_value')
         expands.push('_primarycontactid_value($select=fullname)')
-    } else if (entityLogicalName === 'cp_idea') {
-        fields.push('cp_name', 'cp_description', '_cp_contact_value')
-        // Use correct PascalCase navigation property name
-        expands.push('cp_Contact($select=fullname)', 'createdby($select=fullname)')
+    } else {
+        // Dynamic field expansion based on entity configuration
+        if (entityConfig.cp_keyfields) {
+            // Add key fields from configuration
+            const keyFields = Array.isArray(entityConfig.cp_keyfields) ? 
+                entityConfig.cp_keyfields : 
+                entityConfig.cp_keyfields.split(',').map(f => f.trim())
+            
+            fields.push(...keyFields)
+        }
+        
+        // Add contact lookup expansion if configured
+        if (entityConfig.contactRelationField) {
+            const contactFieldName = `_${entityConfig.contactRelationField}_value`
+            const contactNavProperty = getContactNavigationProperty(entityConfig.contactRelationField)
+            
+            if (contactNavProperty) {
+                fields.push(contactFieldName)
+                expands.push(`${contactNavProperty}($select=fullname)`)
+                console.log(`🎯 SINGLE ENTITY: Added dynamic contact field ${contactFieldName} with ${contactNavProperty} expansion`)
+            }
+        }
     }
     
     // Add any other lookup fields that might be in the entity configuration
@@ -842,15 +1181,16 @@ function getEntityFieldsWithLookups(entityConfig) {
 }
 
 function getAllEntityFields(entityLogicalName) {
-    // In production, this would fetch from entity metadata
-    // For now, return common fields
+    // Essential fields that all entities should have for edit view
     const commonFields = [
         `${entityLogicalName}id`,
-        'createdon',
-        'modifiedon',
+        'createdon',           // Norwegian date field
+        'modifiedon',          // Norwegian date field
         'statecode',
+        'statuscode',
         '_createdby_value',
-        '_modifiedby_value'
+        '_modifiedby_value',
+        '_ownerid_value'
     ]
     
     // Add entity-specific fields
@@ -858,41 +1198,30 @@ function getAllEntityFields(entityLogicalName) {
         commonFields.push('firstname', 'lastname', 'emailaddress1', 'mobilephone', '_parentcustomerid_value')
     } else if (entityLogicalName === 'account') {
         commonFields.push('name', 'telephone1', 'emailaddress1', '_primarycontactid_value')
+    } else if (entityLogicalName === 'cp_idea') {
+        // Add known cp_idea fields to ensure they're included
+        commonFields.push('cp_name', 'cp_description', '_cp_contact_value')
+    } else if (entityLogicalName.startsWith('cp_')) {
+        // For custom entities, add common cp_ fields that typically exist
+        commonFields.push('cp_name') // Most cp_ entities have a name field
     }
+    
+    console.log(`📋 All entity fields for ${entityLogicalName}: ${commonFields.join(', ')}`)
     
     return commonFields.join(',')
 }
 
-function getFieldsFromViewMetadata(viewMetadata, entityConfig) {
+async function getFieldsFromViewMetadata(viewMetadata, entityConfig) {
+    console.log(`🔍 getFieldsFromViewMetadata called:`)
+    console.log(`🔍 viewMetadata:`, viewMetadata)
+    console.log(`🔍 viewMetadata.columns:`, viewMetadata?.columns)
+    console.log(`🔍 entityConfig:`, entityConfig?.entityLogicalName)
+    
     if (viewMetadata && viewMetadata.columns && viewMetadata.columns.length > 0) {
-        // For cp_idea entity, use the proven working pattern from Dataverse REST Builder
-        if (entityConfig.entityLogicalName === 'cp_idea') {
-            // Build select fields from view metadata
-            const fields = []
-            
-            viewMetadata.columns.forEach(col => {
-                const fieldName = col.name
-                if (!fieldName || typeof fieldName !== 'string') return
-                
-                if (fieldName === 'cp_contact') {
-                    // Include the _value field for display and filtering
-                    fields.push('_cp_contact_value')
-                } else {
-                    // Regular field - add as-is
-                    fields.push(fieldName)
-                }
-            })
-            
-            const result = {
-                select: fields.length > 0 ? fields.join(',') : 'cp_ideaid,cp_name,createdon',
-                expand: 'cp_Contact($select=fullname)'  // FIXED: Use PascalCase navigation property
-            }
-            
-            return result
-        }
-        
-        // Smart approach for other entities - use entity metadata to get correct navigation properties
-        return buildSmartQueryFromMetadata(viewMetadata, entityConfig)
+        // Use smart metadata approach for all entities
+        const result = await buildSmartQueryFromMetadata(viewMetadata, entityConfig)
+        console.log(`🔍 buildSmartQueryFromMetadata result:`, result)
+        return result
     }
     
     console.log('⚠️ No valid fields found in view metadata, using default')
@@ -903,58 +1232,87 @@ function getFieldsFromViewMetadata(viewMetadata, entityConfig) {
  * Build smart query using entity metadata to resolve correct navigation property names
  */
 async function buildSmartQueryFromMetadata(viewMetadata, entityConfig) {
+    console.log(`🔍 buildSmartQueryFromMetadata called`)
+    console.log(`🔍 viewMetadata.columns:`, viewMetadata.columns)
+    console.log(`🔍 ENTITY CONFIG DEBUG:`, JSON.stringify(entityConfig, null, 2))
+    console.log(`🔍 Contact relation field (contactRelationField):`, entityConfig?.contactRelationField)
+    console.log(`🔍 DYNAMIC FIELD DETECTION - NO MORE HARDCODED cp_contact!`)
+    
     const fields = []
     const expands = []
     
-    // Get entity metadata to understand navigation properties
-    let entityMetadata = null
-    try {
-        const accessToken = await getAccessToken()
-        if (accessToken) {
-            entityMetadata = await getEntityMetadata(accessToken, entityConfig.entityLogicalName)
-        }
-    } catch (error) {
-        console.warn('Could not fetch entity metadata for smart query building:', error.message)
-    }
-    
-    // Build a map of lookup fields to their correct navigation property names
-    const navigationMap = new Map()
-    if (entityMetadata?.ManyToOneRelationships) {
-        entityMetadata.ManyToOneRelationships.forEach(rel => {
-            if (rel.ReferencingAttribute && rel.ReferencingEntityNavigationPropertyName) {
-                navigationMap.set(rel.ReferencingAttribute, rel.ReferencingEntityNavigationPropertyName)
-            }
-        })
-    }
-    
+    // Process each column from the view metadata
     viewMetadata.columns.forEach(col => {
         const fieldName = col.name
-        if (!fieldName || typeof fieldName !== 'string') return
+        console.log(`🔍 Processing column: ${fieldName}`)
         
-        // Check if this is a lookup field
-        if (navigationMap.has(fieldName)) {
-            // This is a lookup field - use the correct navigation property
-            const navProperty = navigationMap.get(fieldName)
-            fields.push(`_${fieldName}_value`) // Add the value field for selection
-            expands.push(`${navProperty}($select=fullname)`) // Use correct navigation property
-        } else if (fieldName.includes('_value')) {
+        if (!fieldName || typeof fieldName !== 'string') {
+            console.log(`🔍 Skipping invalid field: ${fieldName}`)
+            return
+        }
+        
+        // Flexible field mapping logic - works for any entity
+        if (fieldName.endsWith('_value')) {
             // This is already a lookup field in _fieldname_value format
+            console.log(`🔍 Value field detected: ${fieldName}`)
             fields.push(fieldName)
             
-            // Extract the base field name and try to find navigation property
-            const baseField = fieldName.replace(/^_/, '').replace(/_value$/, '')
-            const navProperty = navigationMap.get(baseField) || baseField
-            expands.push(`${navProperty}($select=fullname)`)
+            // Try to add expand for any lookup field dynamically
+            const navigationProperty = getNavigationPropertyForLookupField(fieldName, entityConfig)
+            if (navigationProperty) {
+                expands.push(`${navigationProperty}($select=fullname)`)
+                console.log(`🔍 Added expand for ${fieldName}: ${navigationProperty}`)
+            }
+        } else if (fieldName.startsWith('cp_')) {
+            // Check if this is a lookup field using inferFieldType
+            const fieldType = inferFieldType(fieldName, entityConfig)
+            console.log(`🔍 CP FIELD CHECK: ${fieldName} -> type: ${fieldType}`)
+            console.log(`🔍 *** NEW BUILD CODE LOADED *** - TESTING contactRelationField`)
+            console.log(`🔍 CP FIELD: entityConfig.contactRelationField = ${entityConfig?.contactRelationField}`)
+            console.log(`🔍 CP FIELD: Match check = ${fieldName === entityConfig?.contactRelationField}`)
+            
+            if (fieldType === 'lookup') {
+                // This looks like a lookup field but in display format (e.g., 'cp_contact')
+                // Convert to actual lookup field format
+                const lookupFieldName = `_${fieldName}_value`
+                console.log(`🔍 Lookup field converted: ${fieldName} -> ${lookupFieldName}`)
+                fields.push(lookupFieldName)
+                
+                // Add expand for the lookup using dynamic navigation property
+                const navigationProperty = getNavigationPropertyForLookupField(lookupFieldName, entityConfig)
+                if (navigationProperty) {
+                    expands.push(`${navigationProperty}($select=fullname)`)
+                    console.log(`🔍 Added expand for ${lookupFieldName}: ${navigationProperty}`)
+                }
+            } else {
+                // Regular cp_ field but not lookup
+                console.log(`🔍 Regular cp_ field: ${fieldName}`)
+                fields.push(fieldName)
+            }
         } else {
-            // Regular field - add as-is
+            // Regular field - add as is (works for any field name)
+            console.log(`🔍 Regular field: ${fieldName}`)
             fields.push(fieldName)
         }
     })
+    
+    // Always include the entity ID field for actions
+    const entityIdField = `${entityConfig.entityLogicalName}id`
+    if (!fields.includes(entityIdField)) {
+        console.log(`🔍 Adding entity ID field: ${entityIdField}`)
+        fields.push(entityIdField)
+    }
     
     const result = {
         select: fields.length > 0 ? fields.join(',') : null,
         expand: expands.length > 0 ? expands.join(',') : null
     }
+    
+    console.log(`🔍 buildSmartQueryFromMetadata result:`)
+    console.log(`🔍 fields array:`, fields)
+    console.log(`🔍 expands array:`, expands)
+    console.log(`🔍 final select:`, result.select)
+    console.log(`🔍 final expand:`, result.expand)
     
     return result
 }
@@ -1072,30 +1430,41 @@ function parseViewMetadata(viewData) {
 }
 
 function formatDisplayName(fieldName) {
-    const displayNames = {
-        'cp_ideaid': 'ID',
-        'cp_name': 'Name',
-        'cp_description': 'Description',
+    // Generic display name formatting without hardcoded entity-specific mappings
+    if (fieldName.endsWith('id')) {
+        return 'ID'
+    }
+    
+    // Common system field names
+    const commonNames = {
         'createdon': 'Created',
         'modifiedon': 'Modified',
         'statuscode': 'Status',
         'statecode': 'State'
     }
     
-    return displayNames[fieldName] || 
+    return commonNames[fieldName] || 
            fieldName.replace(/^cp_/, '').replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())
 }
 
-function inferFieldType(fieldName) {
+function inferFieldType(fieldName, entityConfig = null) {
+    console.log(`🔍 INFER FIELD TYPE DEBUG: fieldName=${fieldName}, entityConfig=`, entityConfig)
+    console.log(`🔍 INFER: entityConfig.contactRelationField =`, entityConfig?.contactRelationField)
+    console.log(`🔍 INFER: Match check: ${fieldName} === ${entityConfig?.contactRelationField} = ${fieldName === entityConfig?.contactRelationField}`)
+    
     if (fieldName.includes('email')) return 'email'
     if (fieldName.includes('phone') || fieldName.includes('telephone')) return 'phone'
     if (fieldName.includes('createdon') || fieldName.includes('modifiedon')) return 'datetime'
     if (fieldName.endsWith('_value')) return 'lookup'
     if (fieldName === 'statuscode' || fieldName === 'statecode') return 'optionset'
     
-    // Handle known contact lookup fields
-    if (fieldName === 'cp_contact') return 'lookup'
+    // Dynamic contact lookup field detection based on entity configuration
+    if (entityConfig?.contactRelationField && fieldName === entityConfig.contactRelationField) {
+        console.log(`🎯 DETECTED AS LOOKUP FIELD: ${fieldName} (matches config contactRelationField)`)
+        return 'lookup'
+    }
     
+    console.log(`📝 DETECTED AS TEXT FIELD: ${fieldName}`)
     return 'text'
 }
 
@@ -1381,7 +1750,42 @@ function inferControlType(fieldName, classType) {
 }
 
 /**
- * Get user contact information
+ * Get user contact information by GUID - SECURE DIRECT LOOKUP
+ */
+async function getUserContactByGuid(accessToken, contactGuid) {
+    const { DATAVERSE_URL } = process.env
+    
+    // Direct GUID lookup - most secure approach
+    const url = `${DATAVERSE_URL}/api/data/v9.0/contacts(${contactGuid})?$select=contactid,cp_portaladmin,_parentcustomerid_value`
+
+    console.log(`🔍 SECURITY: Looking up contact by GUID: ${contactGuid}`)
+    
+    const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'OData-MaxVersion': '4.0',
+            'OData-Version': '4.0',
+            'Accept': 'application/json',
+        },
+    })
+
+    if (!response.ok) {
+        if (response.status === 404) {
+            console.error(`🛡️ SECURITY: Contact GUID ${contactGuid} not found`)
+        } else {
+            console.error(`🛡️ SECURITY: Failed to fetch contact by GUID: ${response.status}`)
+        }
+        return null
+    }
+
+    const contact = await response.json()
+    console.log(`✅ SECURITY: Contact verified - ${contactGuid}`)
+    return contact
+}
+
+/**
+ * Get user contact information (legacy email-based lookup - deprecated)
  */
 async function getUserContact(accessToken, userEmail) {
     const { DATAVERSE_URL } = process.env
@@ -1487,14 +1891,20 @@ async function resolveEntityName(urlPathOrName, accessToken) {
 }
 
 /**
- * Convert lookup field name to navigation property name for Dataverse @odata.bind
- * Maps field names like '_cp_contact_value' or 'cp_contact' to navigation properties like 'cp_Contact'
+ * Derive navigation property name from contact relation field
  */
-function getNavigationPropertyForLookupField(fieldName) {
-    // Known lookup field mappings - FIXED: Use correct PascalCase navigation properties
+function getContactNavigationProperty(contactRelationField) {
+    if (!contactRelationField) return null
+    
+    // Standard pattern: cp_contact -> cp_Contact (capitalize first letter after prefix)
+    return contactRelationField.replace(/^cp_([a-z])/, (match, letter) => `cp_${letter.toUpperCase()}`)
+}
+
+/**
+ * Get dynamic field to navigation property mappings based on entity configuration
+ */
+function getFieldNavigationPropertyMap(entityConfig) {
     const navigationPropertyMap = {
-        '_cp_contact_value': 'cp_Contact',  // FIXED: Correct PascalCase navigation property
-        'cp_contact': 'cp_Contact',         // FIXED: Correct PascalCase navigation property  
         '_contactid_value': 'contactid', 
         'contactid': 'contactid',
         '_createdby_value': 'createdby',
@@ -1503,8 +1913,47 @@ function getNavigationPropertyForLookupField(fieldName) {
         '_parentcustomerid_value': 'parentcustomerid'
     }
     
+    // Add configured contact field mapping if available
+    if (entityConfig?.contactRelationField) {
+        const contactField = entityConfig.contactRelationField
+        const contactNavProperty = getContactNavigationProperty(contactField)
+        
+        console.log(`🔍 NAVIGATION PROPERTY DEBUG:`)
+        console.log(`🔍   Contact field: ${contactField}`)
+        console.log(`🔍   Derived navigation property: ${contactNavProperty}`)
+        
+        if (contactNavProperty) {
+            navigationPropertyMap[`_${contactField}_value`] = contactNavProperty
+            navigationPropertyMap[contactField] = contactNavProperty
+            console.log(`🔍 Added dynamic contact mapping: ${contactField} -> ${contactNavProperty}`)
+            console.log(`🔍   Mapping _${contactField}_value -> ${contactNavProperty}`)
+            console.log(`🔍   Mapping ${contactField} -> ${contactNavProperty}`)
+        }
+    }
+    
+    console.log(`🔍 Final navigation property map:`, navigationPropertyMap)
+    
+    return navigationPropertyMap
+}
+
+/**
+ * Convert lookup field name to navigation property name for Dataverse @odata.bind
+ * Maps field names like '_cp_contact_value' or 'cp_contact' to navigation properties like 'cp_Contact'
+ */
+function getNavigationPropertyForLookupField(fieldName, entityConfig = null) {
+    console.log(`🔍 LOOKUP NAVIGATION DEBUG: ${fieldName}`)
+    console.log(`🔍   EntityConfig provided:`, !!entityConfig)
+    console.log(`🔍   ContactRelationField:`, entityConfig?.contactRelationField)
+    
+    // Get dynamic mappings based on entity configuration
+    const navigationPropertyMap = getFieldNavigationPropertyMap(entityConfig || {})
+    
+    console.log(`🔍   Available mappings:`, Object.keys(navigationPropertyMap))
+    console.log(`🔍   Looking for mapping of: ${fieldName}`)
+    
     // Check direct mapping first
     if (navigationPropertyMap[fieldName]) {
+        console.log(`🔍   Found direct mapping: ${fieldName} -> ${navigationPropertyMap[fieldName]}`)
         return navigationPropertyMap[fieldName]
     }
     

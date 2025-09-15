@@ -115,6 +115,7 @@ async function getAllEntityConfigs(accessToken, isAdmin) {
         'cp_viewmainguid',
         'cp_viewsubgridguid',
         'cp_contactrelationfield',
+        'cp_accountrelationfield',
         'cp_showinmenu',
         'cp_menuicon',
         'cp_menuorder',
@@ -184,6 +185,7 @@ async function getEntityConfig(accessToken, entityName, isAdmin) {
         'cp_viewmainguid',
         'cp_viewsubgridguid',
         'cp_contactrelationfield',
+        'cp_accountrelationfield',
         'cp_showinmenu',
         'cp_menuicon',
         'cp_menuorder',
@@ -210,7 +212,10 @@ async function getEntityConfig(accessToken, entityName, isAdmin) {
     }
 
     const data = await response.json()
+    console.log(`🔍 RAW ENTITY CONFIG from Dataverse for ${entityName}:`, data.value[0])
+    
     const config = data.value && data.value.length > 0 ? normalizeEntityConfig(data.value[0]) : null
+    console.log(`🔍 NORMALIZED ENTITY CONFIG:`, config)
 
     if (config) {
         // Cache the result
@@ -242,6 +247,7 @@ function normalizeEntityConfig(rawConfig) {
         viewMainGuid: rawConfig.cp_viewmainguid,
         viewSubgridGuid: rawConfig.cp_viewsubgridguid,
         contactRelationField: rawConfig.cp_contactrelationfield,
+        accountRelationField: rawConfig.cp_accountrelationfield,
         showInMenu: rawConfig.cp_showinmenu,
         menuIcon: rawConfig.cp_menuicon,
         menuOrder: rawConfig.cp_menuorder,

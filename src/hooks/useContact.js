@@ -16,8 +16,15 @@ export function useContact() {
         if (contact) {
             sessionStorage.setItem('userContact', JSON.stringify(contact))
             console.log('🚨 STORED USER CONTACT GUID:', contact.contactid)
+            
+            // ENHANCEMENT: Also store account GUID for multi-level security
+            if (contact._parentcustomerid_value) {
+                sessionStorage.setItem('userAccountGuid', contact._parentcustomerid_value)
+                console.log('🏢 STORED USER ACCOUNT GUID:', contact._parentcustomerid_value)
+            }
         } else {
             sessionStorage.removeItem('userContact')
+            sessionStorage.removeItem('userAccountGuid')  // Clean up account GUID too
         }
     }, [contact])
 
@@ -132,6 +139,16 @@ export function useContact() {
         return null
     }
 
+    // ENHANCEMENT: Static helper to get account GUID from sessionStorage
+    const getCurrentUserAccountGuid = () => {
+        return sessionStorage.getItem('userAccountGuid') || null
+    }
+
+    // Helper function to get account GUID from contact
+    const getAccountGuid = () => {
+        return contact?._parentcustomerid_value || null
+    }
+
     return {
         contact,
         loading,
@@ -141,6 +158,8 @@ export function useContact() {
         updateContact,
         clearError,
         getContactGuid,
-        getCurrentUserContactGuid
+        getAccountGuid,           // NEW
+        getCurrentUserContactGuid,
+        getCurrentUserAccountGuid  // NEW
     }
 }

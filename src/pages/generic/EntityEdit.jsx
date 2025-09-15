@@ -136,10 +136,13 @@ function EntityEdit() {
                     const fields = extractFieldsFromStructure(formMetadata.structure.tabs)
                     fields.forEach(field => {
                         if (isContactField(field.datafieldname)) {
-                            if (field.datafieldname === 'cp_contact') {
-                                updated['cp_contact'] = currentContactGuid
-                                updated['_cp_contact_value'] = currentContactGuid
-                                console.log('🚨 RE-POPULATED contact fields with stored GUID:', currentContactGuid)
+                            // Use the configured contact relation field name instead of hardcoded 'cp_contact'
+                            const contactRelationField = entityConfig?.cp_contactrelationfield
+                            if (field.datafieldname === contactRelationField) {
+                                // Populate BOTH form field name and lookup field name
+                                updated[contactRelationField] = currentContactGuid
+                                updated[`_${contactRelationField}_value`] = currentContactGuid
+                                console.log('🚨 RE-POPULATED contact fields with stored GUID:', contactRelationField, currentContactGuid)
                             } else {
                                 updated[field.datafieldname] = currentContactGuid
                                 console.log('🚨 RE-POPULATED other contact field:', field.datafieldname, currentContactGuid)
@@ -162,7 +165,14 @@ function EntityEdit() {
         
         try {
             const token = await getToken()
-            const response = await fetch(`/.netlify/functions/generic-entity?entity=${entityName}&id=${entityId}`, {
+            
+            // SECURITY: Get Contact GUID for secure data access
+            const contactGuid = getCurrentUserContactGuid()
+            if (!contactGuid) {
+                throw new Error('Contact GUID required for secure data access')
+            }
+            
+            const response = await fetch(`/.netlify/functions/generic-entity?entity=${entityName}&id=${entityId}&contactGuid=${encodeURIComponent(contactGuid)}`, {
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
@@ -190,7 +200,14 @@ function EntityEdit() {
     const fetchFormMetadata = async () => {
         try {
             const token = await getToken()
-            const response = await fetch(`/.netlify/functions/generic-entity?entity=${entityName}&mode=form`, {
+            
+            // SECURITY: Get Contact GUID for secure data access
+            const contactGuid = getCurrentUserContactGuid()
+            if (!contactGuid) {
+                throw new Error('Contact GUID required for secure data access')
+            }
+            
+            const response = await fetch(`/.netlify/functions/generic-entity?entity=${entityName}&mode=form&contactGuid=${encodeURIComponent(contactGuid)}`, {
                 headers: {
                     'Authorization': `Bearer ${token}`,
                     'Content-Type': 'application/json'
@@ -255,12 +272,13 @@ function EntityEdit() {
                     
                     if (isContactField(fieldName) && currentContactGuid) {
                         // Use the original field name - conversion will happen during rendering
-                        // CRITICAL FIX: Handle cp_contact field specially
-                        if (fieldName === 'cp_contact') {
+                        // Dynamic contact field handling using entity configuration
+                        const contactRelationField = formMetadata?.entityConfig?.cp_contactrelationfield || entityConfig?.cp_contactrelationfield
+                        if (fieldName === contactRelationField) {
                             // Populate BOTH field names to ensure data is available after field conversion
-                            initialData['cp_contact'] = currentContactGuid
-                            initialData['_cp_contact_value'] = currentContactGuid
-                            console.log(`👤 🚨 STORED GUID USED: Double-populated cp_contact=${currentContactGuid} AND _cp_contact_value=${currentContactGuid}`)
+                            initialData[contactRelationField] = currentContactGuid
+                            initialData[`_${contactRelationField}_value`] = currentContactGuid
+                            console.log(`👤 🚨 STORED GUID USED: Double-populated ${contactRelationField}=${currentContactGuid} AND _${contactRelationField}_value=${currentContactGuid}`)
                         } else {
                             initialData[fieldName] = currentContactGuid
                             console.log(`👤 Auto-populated contact field ${fieldName} with stored GUID: ${currentContactGuid}`)
@@ -325,7 +343,7 @@ function EntityEdit() {
             'overriddencreatedon'
         ]
         
-        // Also check for entity-specific ID fields (e.g., cp_ideaid, contactid)
+        // Also check for entity-specific ID fields (dynamic based on entity name)
         const entityIdPattern = new RegExp(`^${entityName}id$`, 'i')
         const entityConfigIdPattern = entityConfig?.entityLogicalName ? 
             new RegExp(`^${entityConfig.entityLogicalName}id$`, 'i') : null
@@ -335,21 +353,28 @@ function EntityEdit() {
                (entityConfigIdPattern && entityConfigIdPattern.test(fieldName))
     }
 
-    // Helper function to identify contact lookup fields
+    // Helper function to identify contact lookup fields (dynamic based on entity config)
     const isContactField = (fieldName) => {
+        // Use the configured contact relation field from entity config
+        const configuredContactField = entityConfig?.cp_contactrelationfield
+        
         const contactFieldPatterns = [
-            '_cp_contact_value',
-            '_contactid_value', 
-            'cp_contact',           // Original field name from form metadata
-            'contactid'
+            '_contactid_value',     // Standard Dataverse contact lookup
+            'contactid'             // Standard contact ID field
         ]
+        
+        // Add the configured contact field and its lookup variant if available
+        if (configuredContactField) {
+            contactFieldPatterns.push(configuredContactField)
+            contactFieldPatterns.push(`_${configuredContactField}_value`)
+        }
         
         const isMatch = contactFieldPatterns.some(pattern => 
             fieldName.toLowerCase() === pattern.toLowerCase()
         )
         
         if (isMatch) {
-            console.log(`🔍 Detected contact field: ${fieldName}`)
+            console.log(`🔍 Detected contact field: ${fieldName} (configured: ${configuredContactField})`)
         }
         
         return isMatch
@@ -394,8 +419,9 @@ function EntityEdit() {
                 if (!isSystemField(key)) {
                     // Handle contact fields - only include the proper _value fields
                     if (isContactField(key)) {
-                        // CRITICAL FIX: Skip the original 'cp_contact' field name, only send '_cp_contact_value'
-                        if (key === 'cp_contact') {
+                        // Skip the original form field name, only send the lookup _value field
+                        const configuredContactField = entityConfig?.cp_contactrelationfield
+                        if (key === configuredContactField) {
                             console.log(`⚠️ SKIPPING form field name: ${key} (not a Dataverse field)`)
                             return
                         }
@@ -441,8 +467,20 @@ function EntityEdit() {
                 }
             })
 
+            // SECURITY: Include Contact GUID in request body for maximum security
+            const contactGuid = getCurrentUserContactGuid()
+            if (!contactGuid) {
+                throw new Error('Contact GUID required for secure save operation')
+            }
+            
+            // Add Contact GUID to save data for server-side verification
+            const secureData = {
+                ...saveData,
+                contactGuid: contactGuid
+            }
+
             // Log the complete request details
-            const requestBody = JSON.stringify(saveData)
+            const requestBody = JSON.stringify(secureData)
             console.log(`📡 ${method} Request Details:`)
             console.log(`📡 URL: ${url}`)
             console.log(`📡 Headers:`, {
@@ -450,7 +488,8 @@ function EntityEdit() {
                 'Content-Type': 'application/json'
             })
             console.log(`📡 Body (${requestBody.length} chars):`, requestBody)
-            console.log(`📡 Parsed Body:`, saveData)
+            console.log(`📡 Parsed Body:`, secureData)
+            console.log(`🛡️ Contact GUID included: ${contactGuid}`)
 
             const response = await fetch(url, {
                 method: method,
@@ -524,6 +563,26 @@ function EntityEdit() {
         return result
     }
 
+    // Helper function to format datetime in Norwegian locale consistently
+    const formatNorwegianDateTime = (dateValue) => {
+        if (!dateValue) return ''
+        
+        try {
+            const date = new Date(dateValue)
+            return date.toLocaleString('nb-NO', {
+                year: 'numeric',
+                month: '2-digit',
+                day: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+                timeZone: 'Europe/Oslo'
+            })
+        } catch (error) {
+            console.error('Error formatting date:', error)
+            return dateValue.toString()
+        }
+    }
+
     const renderField = (field) => {
         const value = formData[field.datafieldname]
         const fieldName = field.datafieldname
@@ -543,8 +602,26 @@ function EntityEdit() {
             return renderViewField(field, value)
         }
 
-        const baseClassName = "mt-1 block w-full border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm"
-        const disabledClassName = isDisabled ? "bg-gray-50 text-gray-500 cursor-not-allowed" : ""
+        const baseClassName = "mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
+        
+        // For disabled fields, use the same styling as view mode for consistency
+        if (isDisabled) {
+            let displayValue = value || 'Not provided'
+            
+            // Format datetime fields with Norwegian locale
+            if (field.controlType === 'datetime' && value) {
+                displayValue = formatNorwegianDateTime(value)
+            }
+            
+            return (
+                <div className="bg-gray-50 border-2 border-solid border-gray-300 rounded-lg px-4 py-3 flex items-center min-h-[44px]">
+                    <svg className="h-4 w-4 text-gray-400 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    </svg>
+                    <span className="text-gray-800">{displayValue}</span>
+                </div>
+            )
+        }
 
         switch (field.controlType) {
             case 'multitext':
@@ -553,7 +630,7 @@ function EntityEdit() {
                         value={value || ''}
                         onChange={(e) => handleInputChange(field.datafieldname, e.target.value)}
                         disabled={isDisabled}
-                        className={`${baseClassName} ${disabledClassName}`}
+                        className={baseClassName}
                         rows={3}
                         placeholder={getFieldDisplayName(field)}
                     />
@@ -582,7 +659,7 @@ function EntityEdit() {
                         value={value ? new Date(value).toISOString().slice(0, 16) : ''}
                         onChange={(e) => handleInputChange(field.datafieldname, e.target.value)}
                         disabled={isDisabled}
-                        className={`${baseClassName} ${disabledClassName}`}
+                        className={baseClassName}
                     />
                 )
 
@@ -593,7 +670,7 @@ function EntityEdit() {
                         value={value || ''}
                         onChange={(e) => handleInputChange(field.datafieldname, e.target.value)}
                         disabled={isDisabled}
-                        className={`${baseClassName} ${disabledClassName}`}
+                        className={baseClassName}
                         placeholder={getFieldDisplayName(field)}
                     />
                 )
@@ -605,7 +682,7 @@ function EntityEdit() {
                         value={value || ''}
                         onChange={(e) => handleInputChange(field.datafieldname, e.target.value)}
                         disabled={isDisabled}
-                        className={`${baseClassName} ${disabledClassName}`}
+                        className={baseClassName}
                         placeholder={getFieldDisplayName(field)}
                     />
                 )
@@ -619,7 +696,7 @@ function EntityEdit() {
                         value={value || ''}
                         onChange={(e) => handleInputChange(field.datafieldname, parseFloat(e.target.value) || 0)}
                         disabled={isDisabled}
-                        className={`${baseClassName} ${disabledClassName}`}
+                        className={baseClassName}
                         placeholder={getFieldDisplayName(field)}
                     />
                 )
@@ -630,28 +707,25 @@ function EntityEdit() {
                 
                 return (
                     <div className="relative">
-                        <input
-                            type="text"
-                            value={lookupDisplayValue}
-                            disabled={true}
-                            className={`${baseClassName} ${isAutoPopulatedContact ? 'bg-blue-50 text-blue-700' : 'bg-gray-50 text-gray-500'} cursor-not-allowed`}
-                            placeholder={isAutoPopulatedContact ? "Auto-populated with your contact" : "Lookup field (read-only)"}
-                        />
-
+                        <div className={`flex items-center ${isAutoPopulatedContact ? 'bg-blue-50 border-2 border-solid border-blue-300' : 'bg-gray-50 border-2 border-solid border-gray-300'} rounded-lg px-4 py-3 min-h-[44px]`}>
+                            <svg className="h-4 w-4 text-gray-400 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                            </svg>
+                            <span className={`${isAutoPopulatedContact ? 'text-blue-700 font-medium' : 'text-gray-800'}`}>
+                                {lookupDisplayValue || (isAutoPopulatedContact ? "Auto-populated with your contact" : "Lookup field (read-only)")}
+                            </span>
+                        </div>
                     </div>
                 )
 
             case 'richtext':
                 return (
-                    <div>
-                        <SimpleRichTextEditor
-                            value={value || ''}
-                            onChange={(content) => handleInputChange(field.datafieldname, content)}
-                            disabled={isDisabled}
-                            label={getFieldDisplayName(field)}
-                            placeholder={`Enter ${getFieldDisplayName(field).toLowerCase()}...`}
-                        />
-                    </div>
+                    <SimpleRichTextEditor
+                        value={value || ''}
+                        onChange={(content) => handleInputChange(field.datafieldname, content)}
+                        disabled={isDisabled}
+                        placeholder={`Enter ${getFieldDisplayName(field).toLowerCase()}...`}
+                    />
                 )
 
             default:
@@ -661,7 +735,7 @@ function EntityEdit() {
                         value={value || ''}
                         onChange={(e) => handleInputChange(field.datafieldname, e.target.value)}
                         disabled={isDisabled}
-                        className={`${baseClassName} ${disabledClassName}`}
+                        className={baseClassName}
                         placeholder={getFieldDisplayName(field)}
                     />
                 )
@@ -670,62 +744,90 @@ function EntityEdit() {
 
     // Render field in view mode (read-only display)
     const renderViewField = (field, value) => {
-        if (value === null || value === undefined || value === '') {
-            return <p className="text-gray-900 bg-gray-50 px-3 py-2 rounded-md border">Not provided</p>
+        // Special handling for rich text fields - they need their own null display
+        if (field.controlType === 'richtext') {
+            return (
+                <SimpleRichTextViewer
+                    content={value || ''}
+                    emptyMessage="No content provided"
+                />
+            )
         }
+        
+        if (value === null || value === undefined || value === '') {
+            return (
+                <div className="bg-gray-50 border-2 border-solid border-gray-300 rounded-lg px-4 py-3 flex items-center">
+                    <svg className="h-4 w-4 text-gray-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+                    </svg>
+                    <span className="text-gray-600 italic">Not provided</span>
+                </div>
+            )
+        }
+
+        const readOnlyFieldStyle = "bg-gray-50 border-2 border-solid border-gray-300 rounded-lg px-4 py-3 flex items-center min-h-[44px]"
+        const readOnlyIcon = (
+            <svg className="h-4 w-4 text-gray-400 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+            </svg>
+        )
 
         switch (field.controlType) {
             case 'datetime':
                 return (
-                    <p className="text-gray-900 bg-gray-50 px-3 py-2 rounded-md border">
-                        {new Date(value).toLocaleString()}
-                    </p>
+                    <div className={readOnlyFieldStyle}>
+                        {readOnlyIcon}
+                        <span className="text-gray-800">{formatNorwegianDateTime(value)}</span>
+                    </div>
                 )
             case 'boolean':
                 return (
-                    <p className="text-gray-900 bg-gray-50 px-3 py-2 rounded-md border">
-                        {value ? 'Yes' : 'No'}
-                    </p>
+                    <div className={readOnlyFieldStyle}>
+                        {readOnlyIcon}
+                        <span className="text-gray-800">{value ? 'Yes' : 'No'}</span>
+                    </div>
                 )
             case 'email':
                 return (
-                    <p className="text-gray-900 bg-gray-50 px-3 py-2 rounded-md border">
-                        <a href={`mailto:${value}`} className="text-blue-600 hover:text-blue-800">{value}</a>
-                    </p>
+                    <div className={readOnlyFieldStyle}>
+                        {readOnlyIcon}
+                        <a href={`mailto:${value}`} className="text-blue-600 hover:text-blue-800 font-medium">{value}</a>
+                    </div>
                 )
             case 'phone':
                 return (
-                    <p className="text-gray-900 bg-gray-50 px-3 py-2 rounded-md border">
-                        <a href={`tel:${value}`} className="text-blue-600 hover:text-blue-800">{value}</a>
-                    </p>
+                    <div className={readOnlyFieldStyle}>
+                        {readOnlyIcon}
+                        <a href={`tel:${value}`} className="text-blue-600 hover:text-blue-800 font-medium">{value}</a>
+                    </div>
                 )
             case 'lookup':
                 return (
-                    <p className="text-gray-900 bg-gray-50 px-3 py-2 rounded-md border">
-                        {getLookupDisplayValue(field.datafieldname, value, formData)}
-                    </p>
-                )
-            case 'richtext':
-                return (
-                    <div>
-                        <SimpleRichTextViewer
-                            content={value}
-                            label={getFieldDisplayName(field)}
-                            emptyMessage="No content provided"
-                        />
+                    <div className={readOnlyFieldStyle}>
+                        {readOnlyIcon}
+                        <span className="text-gray-800">{getLookupDisplayValue(field.datafieldname, value, formData)}</span>
                     </div>
                 )
             default:
                 return (
-                    <p className="text-gray-900 bg-gray-50 px-3 py-2 rounded-md border">
-                        {String(value)}
-                    </p>
+                    <div className={readOnlyFieldStyle}>
+                        {readOnlyIcon}
+                        <span className="text-gray-800">{String(value)}</span>
+                    </div>
                 )
         }
     }
 
     // Helper function to get display value for lookup fields
     const getLookupDisplayValue = (fieldName, value, entityData) => {
+        console.log('🔍 FRONTEND LOOKUP DEBUG:', {
+            fieldName,
+            value,
+            hasEntityData: !!entityData,
+            entityKeys: entityData ? Object.keys(entityData) : [],
+            configuredContactField: entityConfig?.cp_contactrelationfield
+        })
+
         // Special handling for auto-populated contact fields in create mode
         if (isCreateMode && isContactField(fieldName)) {
             const currentContact = getCurrentUserContact()
@@ -735,30 +837,70 @@ function EntityEdit() {
             }
         }
         
+        // Dynamic contact field override using entity configuration
+        const configuredContactField = entityConfig?.cp_contactrelationfield || entityConfig?.contactRelationField
+        // Derive navigation property: cp_contact -> cp_Contact
+        const configuredContactNavProperty = configuredContactField ? 
+            configuredContactField.replace(/^cp_([a-z])/, (match, letter) => `cp_${letter.toUpperCase()}`) : null
+        
+        console.log('🔍 FRONTEND: Contact field mapping:', {
+            configuredContactField,
+            configuredContactNavProperty,
+            fieldName,
+            lookingForNavProp: configuredContactNavProperty,
+            hasNavPropData: !!(configuredContactNavProperty && entityData?.[configuredContactNavProperty])
+        })
+        
+        // Try the configured contact navigation property first
+        if (configuredContactField && fieldName === `_${configuredContactField}_value` && 
+            configuredContactNavProperty && entityData?.[configuredContactNavProperty]) {
+            const contactData = entityData[configuredContactNavProperty]
+            console.log('🎯 FRONTEND: Using dynamic contact lookup:', contactData)
+            if (contactData.fullname) {
+                return contactData.fullname
+            }
+        }
+        
         if (!value || !entityData) {
+            console.log('🔍 FRONTEND: No value or no entity data - returning Not provided')
             return 'Not provided'
         }
         
-        // Map field names to their navigation property names
+        // Comprehensive navigation property mapping
         const navigationPropertyMap = {
-            '_cp_contact_value': 'cp_Contact',
             '_createdby_value': 'createdby',
             '_modifiedby_value': 'modifiedby',
-            '_parentcustomerid_value': 'parentcustomerid'
+            '_parentcustomerid_value': 'parentcustomerid',
+            '_cp_contact_value': 'cp_Contact',  // Standard cp_contact mapping
+            'cp_contact': 'cp_Contact'           // Form field mapping
         }
+        
+        // Add configured contact field mapping if available
+        if (configuredContactField && configuredContactNavProperty) {
+            navigationPropertyMap[`_${configuredContactField}_value`] = configuredContactNavProperty
+            navigationPropertyMap[configuredContactField] = configuredContactNavProperty
+        }
+        
+        console.log('🔍 FRONTEND: Navigation property map:', navigationPropertyMap)
+        console.log('🔍 FRONTEND: Looking for field:', fieldName)
         
         // Check if we have expanded data for this lookup field using navigation property
         const navProperty = navigationPropertyMap[fieldName]
+        console.log('🔍 FRONTEND: Found nav property:', navProperty)
         
         if (navProperty && entityData[navProperty]) {
             const expandedData = entityData[navProperty]
+            console.log('🔍 FRONTEND: Found expanded data:', { navProperty, expandedData })
             
             if (expandedData.fullname) {
+                console.log('✅ FRONTEND: Returning fullname:', expandedData.fullname)
                 return expandedData.fullname
             } else if (expandedData.name) {
+                console.log('✅ FRONTEND: Returning name:', expandedData.name)
                 return expandedData.name
             } else if (expandedData.firstname && expandedData.lastname) {
                 const fullName = `${expandedData.firstname} ${expandedData.lastname}`
+                console.log('✅ FRONTEND: Returning constructed fullname:', fullName)
                 return fullName
             }
         }
@@ -766,15 +908,18 @@ function EntityEdit() {
         // Check for Dataverse formatted value (standard OData annotation)
         const formattedValueKey = `${fieldName}@OData.Community.Display.V1.FormattedValue`
         if (entityData[formattedValueKey]) {
+            console.log('✅ FRONTEND: Returning formatted value:', entityData[formattedValueKey])
             return entityData[formattedValueKey]
         }
         
         // Last resort: show truncated GUID with indicator
         if (typeof value === 'string' && value.length > 8) {
             const truncated = `${value.substring(0, 8)}... (ID)`
+            console.log('✅ FRONTEND: Returning truncated GUID:', truncated)
             return truncated
         }
         
+        console.log('✅ FRONTEND: Returning fallback value:', value || 'Not provided')
         return value || 'Not provided'
     }
 
@@ -947,14 +1092,6 @@ function EntityEdit() {
                                                         })
                                                     })
                                                     
-                                                    // Separate rich text from regular fields
-                                                    const richTextFields = allFields.filter(field => 
-                                                        field.controlType === 'richtext' || field.isRichText
-                                                    )
-                                                    const regularFields = allFields.filter(field => 
-                                                        field.controlType !== 'richtext' && !field.isRichText
-                                                    )
-                                                    
                                                     // Check if section should be visible based on configuration
                                                     const shouldShowSection = (
                                                         section.visible !== false && 
@@ -996,31 +1133,65 @@ function EntityEdit() {
                                                                 </h4>
                                                             )}
                                                             
-                                                            {/* Regular fields in 2-column grid */}
-                                                            {regularFields.length > 0 && (
-                                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                                                                    {regularFields.map(field => (
-                                                                        <div key={field.datafieldname} className="space-y-2">
-                                                                            <label className="block text-sm font-medium text-gray-700">
-                                                                                {getFieldDisplayName(field)}
-                                                                                {field.disabled && <span className="text-gray-400 ml-1">(read-only)</span>}
-                                                                            </label>
-                                                                            {renderField(field)}
-                                                                        </div>
-                                                                    ))}
-                                                                </div>
-                                                            )}
-                                                            
-                                                            {/* Rich text fields full width */}
-                                                            {richTextFields.length > 0 && (
-                                                                <div className="space-y-6">
-                                                                    {richTextFields.map(field => (
-                                                                        <div key={field.datafieldname} className="space-y-2">
-                                                                            {renderField(field)}
-                                                                        </div>
-                                                                    ))}
-                                                                </div>
-                                                            )}
+                                                            {/* Render fields in original order with proper layout */}
+                                                            <div className="space-y-6">
+                                                                {/* Group consecutive regular fields into grid rows */}
+                                                                {(() => {
+                                                                    const fieldGroups = []
+                                                                    let currentGroup = []
+                                                                    
+                                                                    allFields.forEach(field => {
+                                                                        const isRichText = field.controlType === 'richtext' || field.isRichText
+                                                                        
+                                                                        if (isRichText) {
+                                                                            // Flush current group if exists
+                                                                            if (currentGroup.length > 0) {
+                                                                                fieldGroups.push({ type: 'grid', fields: currentGroup })
+                                                                                currentGroup = []
+                                                                            }
+                                                                            // Add rich text field as standalone
+                                                                            fieldGroups.push({ type: 'richtext', field })
+                                                                        } else {
+                                                                            // Add to current group
+                                                                            currentGroup.push(field)
+                                                                        }
+                                                                    })
+                                                                    
+                                                                    // Flush any remaining group
+                                                                    if (currentGroup.length > 0) {
+                                                                        fieldGroups.push({ type: 'grid', fields: currentGroup })
+                                                                    }
+                                                                    
+                                                                    return fieldGroups.map((group, index) => {
+                                                                        if (group.type === 'grid') {
+                                                                            return (
+                                                                                <div key={`grid-${index}`} className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                                                                                    {group.fields.map(field => (
+                                                                                        <div key={field.datafieldname} className="space-y-2">
+                                                                                            <label className="block text-sm font-medium text-gray-700">
+                                                                                                {getFieldDisplayName(field)}
+                                                                                                {field.disabled && <span className="text-gray-400 ml-1">(read-only)</span>}
+                                                                                            </label>
+                                                                                            {renderField(field)}
+                                                                                        </div>
+                                                                                    ))}
+                                                                                </div>
+                                                                            )
+                                                                        } else if (group.type === 'richtext') {
+                                                                            return (
+                                                                                <div key={`richtext-${group.field.datafieldname}`} className="space-y-2">
+                                                                                    <label className="block text-sm font-medium text-gray-700">
+                                                                                        {getFieldDisplayName(group.field)}
+                                                                                        {group.field.disabled && <span className="text-gray-400 ml-1">(read-only)</span>}
+                                                                                    </label>
+                                                                                    {renderField(group.field)}
+                                                                                </div>
+                                                                            )
+                                                                        }
+                                                                        return null
+                                                                    })
+                                                                })()}
+                                                            </div>
                                                         </div>
                                                     )
                                                 }).filter(Boolean) // Remove null entries for hidden sections
