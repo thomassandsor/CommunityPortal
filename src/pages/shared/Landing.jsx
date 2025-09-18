@@ -117,7 +117,7 @@ function Landing() {
                                 </div>
                                 <div>
                                     <h3 className="font-semibold text-gray-900">Secure Authentication</h3>
-                                    <p className="text-gray-600">Login with work accounts (Microsoft Entra ID) or personal emails</p>
+                                    <p className="text-gray-600">Clerk.dev for simple and secure logins</p>
                                 </div>
                             </div>
 
