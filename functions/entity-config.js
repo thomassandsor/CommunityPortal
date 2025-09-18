@@ -18,7 +18,7 @@ import { validateSimpleAuth, createAuthErrorResponse, createSuccessResponse } fr
 
 // Configuration cache (in production, use Redis or similar)
 const configCache = new Map()
-const CACHE_TTL = 5 * 60 * 1000 // 5 minutes
+const CACHE_TTL = 1 * 60 * 1000 // 1 minute (reduced from 5 minutes for faster updates)
 
 export const handler = async (event) => {
     // Handle CORS preflight requests
@@ -55,6 +55,13 @@ export const handler = async (event) => {
         if (user.userEmail) {
             const userContact = await getUserContact(accessToken, user.userEmail)
             isAdmin = userContact?.cp_portaladmin || false
+        }
+
+        // Check if cache clear is requested
+        const clearCache = event.queryStringParameters?.clearCache === 'true'
+        if (clearCache) {
+            console.log('🧹 Clearing entity config cache...')
+            configCache.clear()
         }
 
         // Get requested entity or all configurations
@@ -96,16 +103,25 @@ async function getAllEntityConfigs(accessToken, isAdmin) {
         console.log('📋 Returning cached entity configurations')
         return cached.data
     }
+    
+    console.log('🔄 Cache miss or expired - fetching fresh data')
 
     console.log('🔍 Fetching entity configurations from Dataverse...')
+    console.log('🔍 User isAdmin:', isAdmin)
     
     const { DATAVERSE_URL } = process.env
     
     // Build filter based on admin status
-    let filter = 'statecode eq 0' // Only active configurations
+    // Always start with active configurations that should show in menu
+    let filter = 'statecode eq 0 and cp_showinmenu eq true'
+    
+    // For non-admins, exclude configurations that require admin privileges
     if (!isAdmin) {
-        filter += ' and cp_requiresadmin ne true' // Exclude admin-only configs for non-admins
+        filter += ' and cp_requiresadmin ne true'
     }
+    // For admins, show all configurations where cp_showinmenu = true (regardless of cp_requiresadmin)
+    
+    console.log('🔍 OData Filter:', filter)
     
     const select = [
         'cp_entityconfigid',
@@ -124,6 +140,7 @@ async function getAllEntityConfigs(accessToken, isAdmin) {
     ].join(',')
 
     const url = `${DATAVERSE_URL}/api/data/v9.0/cp_entityconfigs?$filter=${encodeURIComponent(filter)}&$select=${select}&$orderby=cp_menuorder`
+    console.log('🔍 Full OData URL:', url)
 
     const response = await fetch(url, {
         method: 'GET',
@@ -142,6 +159,8 @@ async function getAllEntityConfigs(accessToken, isAdmin) {
     }
 
     const data = await response.json()
+    console.log(`✅ Found ${data.value.length} entity configurations matching filter`)
+    
     const configs = data.value.map(normalizeEntityConfig)
 
     // Cache the results
@@ -173,6 +192,8 @@ async function getEntityConfig(accessToken, entityName, isAdmin) {
     
     // Build filter for specific entity
     let filter = `statecode eq 0 and cp_entitylogicalname eq '${entityName}'`
+    // Note: For single entity lookup, we don't filter by cp_showinmenu 
+    // because this is used for entity operations, not just menu display
     if (!isAdmin) {
         filter += ' and cp_requiresadmin ne true'
     }

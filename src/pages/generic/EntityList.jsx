@@ -200,15 +200,20 @@ function EntityList() {
                         
                         <div className="flex items-center space-x-3">
                             {/* View Mode Selector - Only show for contact-owned entities with admin users */}
+                            {/* Account-only entities (like contacts) don't need view selector since all records are organization-level */}
                             {(() => {
                                 console.log('🔍 VIEW SELECTOR DEBUG:', {
                                     entityConfigExists: !!entityConfig,
                                     contactRelationField: entityConfig?.contactRelationField,
+                                    accountRelationField: entityConfig?.accountRelationField,
                                     userIsAdminFromAPI: userIsAdmin,
+                                    isContactOwned: !!entityConfig?.contactRelationField,
+                                    isAccountOnly: !!entityConfig?.accountRelationField && !entityConfig?.contactRelationField,
                                     shouldShowSelector: entityConfig?.contactRelationField && userIsAdmin
                                 })
                                 
-                                // Now use proper admin check from Dataverse
+                                // Only show view selector for contact-owned entities (not account-only)
+                                // Account-only entities like contacts are always "organization" scope
                                 return entityConfig?.contactRelationField && userIsAdmin && (
                                     <div className="flex items-center space-x-2">
                                         <label className="text-sm font-medium text-gray-700">View:</label>

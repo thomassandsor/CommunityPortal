@@ -206,6 +206,74 @@ netlify dev
 6. **NEVER Delete .netlify Directory** - Contains critical cache and configuration files
 7. **Always Verify Netlify Linking** - Run `netlify status` before development to ensure proper setup
 
+## 🚀 AI ASSISTANT TERMINAL WORKFLOW (CRITICAL)
+
+### The Challenge
+AI assistants often get confused when managing long-running dev servers and executing other terminal commands, leading to:
+- Starting multiple dev servers accidentally
+- Trying to run commands in the server terminal
+- Forgetting that the server is running
+- Terminal session conflicts
+
+### ✅ SOLUTION: Background Server + Separate Command Terminals
+
+#### Step 1: Start Dev Server in Background
+```bash
+# Use isBackground=true to start server without blocking terminal
+run_in_terminal(
+  command="netlify dev",
+  isBackground=true,
+  explanation="Starting Netlify dev server in background mode"
+)
+# Returns server terminal ID (e.g., bdb26b73-9f44-461f-a146-dd1ce7253c8e)
+```
+
+#### Step 2: Execute Other Commands in Separate Sessions
+```bash
+# Use isBackground=false for all other commands (creates new terminal sessions)
+run_in_terminal(
+  command="node -c functions/generic-entity.js",
+  isBackground=false,
+  explanation="Checking syntax in separate terminal session"
+)
+```
+
+#### Step 3: Monitor Server Status Anytime
+```bash
+# Check server status using saved terminal ID
+get_terminal_output(id="bdb26b73-9f44-461f-a146-dd1ce7253c8e")
+```
+
+### 📋 AI Assistant Standard Operating Procedure
+
+#### When Starting Development Session:
+1. ✅ **Always start dev server with `isBackground=true`**
+2. ✅ **Save and remember the server terminal ID**
+3. ✅ **Verify server starts successfully via `get_terminal_output`**
+
+#### When Running Other Commands:
+1. ✅ **Always use `isBackground=false` for non-server commands**
+2. ✅ **Each command gets a fresh terminal session**
+3. ✅ **No terminal session conflicts**
+
+#### When Checking Server Status:
+1. ✅ **Use `get_terminal_output(server_id)` to check server health**
+2. ✅ **Look for "Local dev server ready: http://localhost:8888"**
+3. ✅ **Check for function loading errors or syntax issues**
+
+### 🔄 Benefits of This Approach
+- **No Terminal Confusion** - Server runs in background, commands in separate sessions
+- **Always Available Server** - Can check server status anytime without interruption
+- **Clean Command Execution** - Each command gets a fresh, unblocked terminal
+- **Error Isolation** - Syntax errors don't kill the development workflow
+- **Persistent Server** - Dev server continues running through entire session
+
+### ❌ What NOT to Do
+- **Never start dev server with `isBackground=false`** (blocks terminal)
+- **Never run other commands with server terminal ID** (conflicts with running server)
+- **Never forget to save server terminal ID** (loses ability to monitor)
+- **Never start multiple dev servers** (port conflicts)
+
 ## 🔌 API INTEGRATION
 
 ### Dataverse Contact Fields:

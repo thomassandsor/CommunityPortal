@@ -136,8 +136,8 @@ CommunityPortal/
 │   └── components/
 │       ├── forms/               # Form components
 │       │   ├── ContactForm.jsx  # Contact data form
-│       │   ├── RichTextEditor.jsx # Rich text editing
-│       │   └── RichTextViewer.jsx # Rich text display
+│       │   ├── SimpleRichTextEditor.jsx # Native rich text editing
+│       │   └── SimpleRichTextViewer.jsx # Safe rich text display
 │       └── shared/              # Shared components
 │           ├── ContactChecker.jsx # Auto contact management
 │           ├── DynamicSidebar.jsx # Dynamic navigation menu
@@ -172,7 +172,7 @@ CommunityPortal/
 - ✅ Auto-create contact if none exists (basic info from Clerk)
 - ✅ Route to appropriate page based on contact completeness
 - ✅ Prevent duplicate API calls with session storage
-- ✅ Handle errors gracefully with fallback routing
+- ✅ Handle errors gracefully with clear error messages
 
 ## 🛠️ DEVELOPMENT WORKFLOW
 
@@ -205,6 +205,74 @@ netlify dev
 5. **Session Storage Protection** - Prevent duplicate API calls in same session
 6. **NEVER Delete .netlify Directory** - Contains critical cache and configuration files
 7. **Always Verify Netlify Linking** - Run `netlify status` before development to ensure proper setup
+
+## 🚀 AI ASSISTANT TERMINAL WORKFLOW (CRITICAL)
+
+### The Challenge
+AI assistants often get confused when managing long-running dev servers and executing other terminal commands, leading to:
+- Starting multiple dev servers accidentally
+- Trying to run commands in the server terminal
+- Forgetting that the server is running
+- Terminal session conflicts
+
+### ✅ SOLUTION: Background Server + Separate Command Terminals
+
+#### Step 1: Start Dev Server in Background
+```bash
+# Use isBackground=true to start server without blocking terminal
+run_in_terminal(
+  command="netlify dev",
+  isBackground=true,
+  explanation="Starting Netlify dev server in background mode"
+)
+# Returns server terminal ID (e.g., bdb26b73-9f44-461f-a146-dd1ce7253c8e)
+```
+
+#### Step 2: Execute Other Commands in Separate Sessions
+```bash
+# Use isBackground=false for all other commands (creates new terminal sessions)
+run_in_terminal(
+  command="node -c functions/generic-entity.js",
+  isBackground=false,
+  explanation="Checking syntax in separate terminal session"
+)
+```
+
+#### Step 3: Monitor Server Status Anytime
+```bash
+# Check server status using saved terminal ID
+get_terminal_output(id="bdb26b73-9f44-461f-a146-dd1ce7253c8e")
+```
+
+### 📋 AI Assistant Standard Operating Procedure
+
+#### When Starting Development Session:
+1. ✅ **Always start dev server with `isBackground=true`**
+2. ✅ **Save and remember the server terminal ID**
+3. ✅ **Verify server starts successfully via `get_terminal_output`**
+
+#### When Running Other Commands:
+1. ✅ **Always use `isBackground=false` for non-server commands**
+2. ✅ **Each command gets a fresh terminal session**
+3. ✅ **No terminal session conflicts**
+
+#### When Checking Server Status:
+1. ✅ **Use `get_terminal_output(server_id)` to check server health**
+2. ✅ **Look for "Local dev server ready: http://localhost:8888"**
+3. ✅ **Check for function loading errors or syntax issues**
+
+### 🔄 Benefits of This Approach
+- **No Terminal Confusion** - Server runs in background, commands in separate sessions
+- **Always Available Server** - Can check server status anytime without interruption
+- **Clean Command Execution** - Each command gets a fresh, unblocked terminal
+- **Error Isolation** - Syntax errors don't kill the development workflow
+- **Persistent Server** - Dev server continues running through entire session
+
+### ❌ What NOT to Do
+- **Never start dev server with `isBackground=false`** (blocks terminal)
+- **Never run other commands with server terminal ID** (conflicts with running server)
+- **Never forget to save server terminal ID** (loses ability to monitor)
+- **Never start multiple dev servers** (port conflicts)
 
 ## 🔌 API INTEGRATION
 
@@ -426,7 +494,7 @@ export const handler = async (event) => {
 ```javascript
 // src/pages/generic/EntityEdit.jsx - Universal entity editing
 import { useState, useEffect } from 'react'
-import RichTextEditor from '../../components/forms/RichTextEditor'
+import SimpleRichTextEditor from '../../components/forms/SimpleRichTextEditor'
 
 function EntityEdit() {
   // Mode detection: create vs edit vs view
@@ -447,7 +515,7 @@ function EntityEdit() {
   const renderField = (field) => {
     switch (field.controlType) {
       case 'richtext':
-        return <RichTextEditor value={formData[field.name]} onChange={...} />
+        return <SimpleRichTextEditor value={formData[field.name]} onChange={...} />
       case 'lookup':
         return <div>{getLookupDisplayValue(formData, field.name)}</div>
       default:
@@ -508,33 +576,31 @@ function ContactChecker({ children }) {
 }
 ```
 
-#### 7. Rich Text Editor Pattern (NEW)
+#### 7. Rich Text Editor Pattern (UPDATED)
 ```javascript
-// components/forms/RichTextEditor.jsx - Quill.js integration
-import ReactQuill from 'react-quill'
-import 'react-quill/dist/quill.snow.css'
-
-function RichTextEditor({ value, onChange, placeholder, readOnly = false }) {
+// components/forms/SimpleRichTextEditor.jsx - Native contentEditable implementation
+function SimpleRichTextEditor({ value, onChange, placeholder, readOnly = false }) {
   const modules = {
     toolbar: [
-      [{ 'header': [1, 2, 3, false] }],
-      ['bold', 'italic', 'underline', 'strike'],
-      [{ 'list': 'ordered'}, { 'list': 'bullet' }],
-      ['link', 'image'],
-      ['clean']
+      'bold', 'italic', 'underline',
+      'h1', 'h2', 'h3',
+      'ul', 'ol',
+      'link'
     ]
   }
   
   return (
-    <ReactQuill
-      theme="snow"
-      value={value || ''}
-      onChange={onChange}
-      modules={modules}
-      placeholder={placeholder}
-      readOnly={readOnly}
-    />
+    <div className="border border-gray-300 rounded-md">
+      {!readOnly && <Toolbar />}
+      <div
+        contentEditable={!readOnly}
+        className="min-h-[200px] p-3 prose max-w-none"
+        onInput={(e) => onChange(e.target.innerHTML)}
+        dangerouslySetInnerHTML={{ __html: value || '' }}
+      />
+    </div>
   )
+}
 }
 ```
 
@@ -652,8 +718,7 @@ CLERK_SECRET_KEY=
 ### Dependencies
 ```json
 {
-  "react-quill": "^2.0.0",
-  "quill": "^1.3.7"
+  "Note": "Rich text editing now uses native browser APIs - no external dependencies required"
 }
 ```
 
@@ -688,7 +753,7 @@ CLERK_SECRET_KEY=
 1. **Entity Configuration**: Add entity to `cp_entityconfigurations` table in Dataverse
 2. **Function**: Use `functions/generic-entity.js` (no need to create new files)
 3. **Component**: Use `src/pages/generic/EntityEdit.jsx` (universal component)
-4. **Rich Text Fields**: Use `RichTextEditor` component for multiline text
+4. **Rich Text Fields**: Use `SimpleRichTextEditor` component for multiline text
 5. **Lookup Fields**: Ensure navigation properties are properly mapped
 6. **Route**: Add dynamic route in App.jsx: `/entity/:entityName/:mode?/:entityId?`
 7. **Documentation**: Update README.md with new functionality
@@ -800,10 +865,12 @@ The most recent development session focused on **fixing lookup field display in 
 - 🔄 Final verification needed: Check if "Thomas Sandsør" now displays instead of "Not provided"
 
 ### For New AI Assistant Taking Over
-1. **First Priority**: Verify that the Contact field now shows "Thomas Sandsør" instead of "Not provided"
-2. **If Still Not Working**: Check the latest console logs and verify the `getLookupDisplayValue` function is being called correctly
-3. **Key Files Modified**: `functions/generic-entity.js`, `src/pages/generic/EntityEdit.jsx`
-4. **Testing Pattern**: Load an idea entity with a contact lookup field and verify display
+1. **CRITICAL CURRENT ISSUE**: Contact lookup field not saving to Dataverse when creating Ideas
+2. **Status**: Frontend working (sends correct GUID), backend returns 200 OK, but no relationship created
+3. **Debugging Added**: Extensive logging in `sanitizeDataForDataverse()` function
+4. **Key Test**: Create Idea with title "Debug Test X" and check backend logs for field analysis
+5. **Files Modified**: `functions/generic-entity.js` (debugging), `src/pages/generic/EntityEdit.jsx` (contact auto-population)
+6. **User Context**: Thomas (sandsor@gmail.com), Contact GUID: 61f225a9-007e-f011-b4cb-7ced8d5de1dd
 
 ### Critical Code Patterns That Must Be Maintained
 ```javascript

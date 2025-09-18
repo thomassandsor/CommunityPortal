@@ -2,7 +2,32 @@
 
 A production-ready starter template for building community portals with Microsoft Dataverse integration. Copy this project and have your own portal running in 30-45 minutes!
 
-## 🚀 Quick Start
+#### 📚 Documentation
+
+### Setup & Configuration
+- **[HOW-TO-GUIDE.md](HOW-TO-GUIDE.md)** - Complete setup instructions
+- **[ENTITY_CONFIGURATION.md](docs/ENTITY_CONFIGURATION.md)** - Configure dynamic entities
+- **[ICON_REFERENCE.md](docs/ICON_REFERENCE.md)** - Available menu icons
+
+### Architecture & Development  
+- **[CHAT_MODE_INSTRUCTIONS.md](CHAT_MODE_INSTRUCTIONS.md)** - AI assistant guide
+- **[DYNAMIC_ENTITY_CONFIG.md](docs/DYNAMIC_ENTITY_CONFIG.md)** - Technical architecture
+- **[SERVER_SIDE_SECURITY.md](docs/SERVER_SIDE_SECURITY.md)** - Security implementation
+
+### Project Status
+- **[PROJECT_STATUS.md](PROJECT_STATUS.md)** - Current system status and features
+
+## � License
+
+MIT License - see [LICENSE](LICENSE) file for details.
+
+## 💬 Support
+
+- **Issues**: [GitHub Issues](../../issues) for bugs and feature requests
+- **Discussions**: [GitHub Discussions](../../discussions) for community help
+- **Setup Help**: Review [HOW-TO-GUIDE.md](HOW-TO-GUIDE.md) for complete setup
+- **Entity Config**: See [ENTITY_CONFIGURATION.md](docs/ENTITY_CONFIGURATION.md) for adding entities
+- **AI Development**: Use [CHAT_MODE_INSTRUCTIONS.md](CHAT_MODE_INSTRUCTIONS.md) with AI assistantsStart
 
 **👉 [Complete Setup Guide - HOW-TO-GUIDE.md](HOW-TO-GUIDE.md) 👈**
 

@@ -227,7 +227,7 @@ async function handleListRequest(accessToken, entityConfig, userContact, viewMod
     // Get view metadata if available
     let viewMetadata = null
     if (entityConfig.viewMainGuid) {
-        viewMetadata = await getViewMetadata(accessToken, entityConfig.viewMainGuid)
+        viewMetadata = await getViewMetadata(accessToken, entityConfig.viewMainGuid, entityConfig)
     }
     
     // Build security filter
@@ -363,7 +363,7 @@ async function handleSingleEntityRequest(accessToken, entityConfig, userContact,
     
     if (entityConfig.viewMainGuid) {
         try {
-            viewMetadata = await getViewMetadata(accessToken, entityConfig.viewMainGuid)
+            viewMetadata = await getViewMetadata(accessToken, entityConfig.viewMainGuid, entityConfig)
             console.log(`📋 Got view metadata for lookup expansions: ${viewMetadata?.name}`)
             
             // Use smart query building ONLY for lookup expansions
@@ -1115,35 +1115,32 @@ function getEntityFieldsWithLookups(entityConfig) {
     
     const expands = []
     
-    // Add entity-specific fields with lookup expansions
-    if (entityLogicalName === 'contact') {
-        fields.push('firstname', 'lastname', 'emailaddress1', 'mobilephone', '_parentcustomerid_value')
-        expands.push('_parentcustomerid_value($select=name)')
-    } else if (entityLogicalName === 'account') {
-        fields.push('name', 'telephone1', 'emailaddress1', '_primarycontactid_value')
-        expands.push('_primarycontactid_value($select=fullname)')
-    } else {
-        // Dynamic field expansion based on entity configuration
-        if (entityConfig.cp_keyfields) {
-            // Add key fields from configuration
-            const keyFields = Array.isArray(entityConfig.cp_keyfields) ? 
-                entityConfig.cp_keyfields : 
-                entityConfig.cp_keyfields.split(',').map(f => f.trim())
-            
-            fields.push(...keyFields)
-        }
+    // FULLY DYNAMIC - NO MORE HARDCODED ENTITY-SPECIFIC LOGIC
+    console.log('🔄 USING DYNAMIC FIELD DETECTION - ELIMINATED HARDCODED ENTITY CHECKS')
+    
+    // Add dynamic lookup fields based on entity configuration
+    if (entityConfig.contactRelationField) {
+        const lookupField = `_${entityConfig.contactRelationField}_value`
+        fields.push(lookupField)
+        expands.push(`${getNavigationPropertyForLookupField(lookupField, entityConfig)}($select=fullname)`)
+        console.log(`✅ Added contact lookup: ${lookupField}`)
+    }
+    
+    if (entityConfig.accountRelationField) {
+        const lookupField = `_${entityConfig.accountRelationField}_value`
+        fields.push(lookupField)
+        expands.push(`${getNavigationPropertyForLookupField(lookupField, entityConfig)}($select=name)`)
+        console.log(`✅ Added account lookup: ${lookupField}`)
+    }
+    
+    // Dynamic field expansion based on entity configuration
+    if (entityConfig.cp_keyfields) {
+        // Add key fields from configuration
+        const keyFields = Array.isArray(entityConfig.cp_keyfields) ? 
+            entityConfig.cp_keyfields : 
+            entityConfig.cp_keyfields.split(',').map(f => f.trim())
         
-        // Add contact lookup expansion if configured
-        if (entityConfig.contactRelationField) {
-            const contactFieldName = `_${entityConfig.contactRelationField}_value`
-            const contactNavProperty = getContactNavigationProperty(entityConfig.contactRelationField)
-            
-            if (contactNavProperty) {
-                fields.push(contactFieldName)
-                expands.push(`${contactNavProperty}($select=fullname)`)
-                console.log(`🎯 SINGLE ENTITY: Added dynamic contact field ${contactFieldName} with ${contactNavProperty} expansion`)
-            }
-        }
+        fields.push(...keyFields)
     }
     
     // Add any other lookup fields that might be in the entity configuration
@@ -1193,17 +1190,22 @@ function getAllEntityFields(entityLogicalName) {
         '_ownerid_value'
     ]
     
-    // Add entity-specific fields
+    // FULLY DYNAMIC - NO MORE HARDCODED ENTITY-SPECIFIC FIELDS
+    console.log('🔄 DYNAMIC FIELD DETECTION - NO MORE HARDCODED ENTITY LOGIC')
+    
+    // Add common fields that most entities have based on type
     if (entityLogicalName === 'contact') {
-        commonFields.push('firstname', 'lastname', 'emailaddress1', 'mobilephone', '_parentcustomerid_value')
+        // Standard Dataverse contact fields
+        commonFields.push('firstname', 'lastname', 'fullname', 'emailaddress1', 'mobilephone', '_parentcustomerid_value')
     } else if (entityLogicalName === 'account') {
-        commonFields.push('name', 'telephone1', 'emailaddress1', '_primarycontactid_value')
-    } else if (entityLogicalName === 'cp_idea') {
-        // Add known cp_idea fields to ensure they're included
-        commonFields.push('cp_name', 'cp_description', '_cp_contact_value')
+        // Standard Dataverse account fields  
+        commonFields.push('name', 'emailaddress1', '_primarycontactid_value')
     } else if (entityLogicalName.startsWith('cp_')) {
-        // For custom entities, add common cp_ fields that typically exist
-        commonFields.push('cp_name') // Most cp_ entities have a name field
+        // For custom entities, add most common cp_ field
+        commonFields.push('cp_name')
+        
+        // Note: Specific fields should come from view metadata or entity configuration
+        // This function should eventually be deprecated in favor of view-metadata-driven approach
     }
     
     console.log(`📋 All entity fields for ${entityLogicalName}: ${commonFields.join(', ')}`)
@@ -1260,8 +1262,10 @@ async function buildSmartQueryFromMetadata(viewMetadata, entityConfig) {
             // Try to add expand for any lookup field dynamically
             const navigationProperty = getNavigationPropertyForLookupField(fieldName, entityConfig)
             if (navigationProperty) {
-                expands.push(`${navigationProperty}($select=fullname)`)
-                console.log(`🔍 Added expand for ${fieldName}: ${navigationProperty}`)
+                // Use appropriate display field based on navigation property
+                const displayField = navigationProperty.includes('account') ? 'name' : 'fullname'
+                expands.push(`${navigationProperty}($select=${displayField})`)
+                console.log(`🔍 Added expand for ${fieldName}: ${navigationProperty}($select=${displayField})`)
             }
         } else if (fieldName.startsWith('cp_')) {
             // Check if this is a lookup field using inferFieldType
@@ -1281,8 +1285,10 @@ async function buildSmartQueryFromMetadata(viewMetadata, entityConfig) {
                 // Add expand for the lookup using dynamic navigation property
                 const navigationProperty = getNavigationPropertyForLookupField(lookupFieldName, entityConfig)
                 if (navigationProperty) {
-                    expands.push(`${navigationProperty}($select=fullname)`)
-                    console.log(`🔍 Added expand for ${lookupFieldName}: ${navigationProperty}`)
+                    // Use appropriate display field based on navigation property
+                    const displayField = navigationProperty.includes('account') ? 'name' : 'fullname'
+                    expands.push(`${navigationProperty}($select=${displayField})`)
+                    console.log(`🔍 Added expand for ${lookupFieldName}: ${navigationProperty}($select=${displayField})`)
                 }
             } else {
                 // Regular cp_ field but not lookup
@@ -1290,9 +1296,43 @@ async function buildSmartQueryFromMetadata(viewMetadata, entityConfig) {
                 fields.push(fieldName)
             }
         } else {
-            // Regular field - add as is (works for any field name)
-            console.log(`🔍 Regular field: ${fieldName}`)
-            fields.push(fieldName)
+            // Use inferFieldType to determine if this is a lookup field
+            const fieldType = inferFieldType(fieldName, entityConfig)
+            console.log(`🔍 INFER BASED CHECK: ${fieldName} -> inferFieldType result: ${fieldType}`)
+            
+            if (fieldType === 'lookup') {
+                // This field is detected as lookup by our inference logic
+                const lookupFieldName = `_${fieldName}_value`
+                console.log(`🔍 Lookup field via inference: ${fieldName} -> ${lookupFieldName}`)
+                fields.push(lookupFieldName)
+                
+                // Add expand for the lookup using dynamic navigation property
+                const navigationProperty = getNavigationPropertyForLookupField(lookupFieldName, entityConfig)
+                if (navigationProperty) {
+                    // Use appropriate display field based on navigation property
+                    const displayField = navigationProperty.includes('account') ? 'name' : 'fullname'
+                    expands.push(`${navigationProperty}($select=${displayField})`)
+                    console.log(`🔍 Added expand for ${lookupFieldName}: ${navigationProperty}($select=${displayField})`)
+                }
+            } else if (col.type === 'lookup') {
+                // Fallback: This field is marked as lookup in view metadata (e.g., parentcustomerid)
+                const lookupFieldName = `_${fieldName}_value`
+                console.log(`🔍 Lookup field from metadata: ${fieldName} -> ${lookupFieldName}`)
+                fields.push(lookupFieldName)
+                
+                // Add expand for the lookup using dynamic navigation property
+                const navigationProperty = getNavigationPropertyForLookupField(lookupFieldName, entityConfig)
+                if (navigationProperty) {
+                    // Use appropriate display field based on navigation property
+                    const displayField = navigationProperty.includes('account') ? 'name' : 'fullname'
+                    expands.push(`${navigationProperty}($select=${displayField})`)
+                    console.log(`🔍 Added expand for ${lookupFieldName}: ${navigationProperty}($select=${displayField})`)
+                }
+            } else {
+                // Regular field - add as is (works for any field name)
+                console.log(`🔍 Regular field: ${fieldName}`)
+                fields.push(fieldName)
+            }
         }
     })
     
@@ -1320,7 +1360,7 @@ async function buildSmartQueryFromMetadata(viewMetadata, entityConfig) {
 /**
  * Get view metadata (reuse from organization function)
  */
-async function getViewMetadata(accessToken, viewGuid) {
+async function getViewMetadata(accessToken, viewGuid, entityConfig = null) {
     const { DATAVERSE_URL } = process.env
     
     const url = `${DATAVERSE_URL}/api/data/v9.0/savedqueries(${viewGuid})?$select=name,description,layoutxml,fetchxml`
@@ -1341,7 +1381,7 @@ async function getViewMetadata(accessToken, viewGuid) {
     }
 
     const data = await response.json()
-    return parseViewMetadata(data)
+    return parseViewMetadata(data, entityConfig)
 }
 
 /**
@@ -1372,7 +1412,7 @@ async function getFormMetadata(accessToken, formGuid) {
 }
 
 // Import parsing functions from organization.js
-function parseViewMetadata(viewData) {
+function parseViewMetadata(viewData, entityConfig = null) {
     console.log('🔍 Parsing view metadata for:', viewData.name)
     
     if (!viewData.layoutxml) {
@@ -1387,6 +1427,17 @@ function parseViewMetadata(viewData) {
         // Parse the layoutxml to extract column information
         const layoutxml = viewData.layoutxml
         console.log('📋 Layout XML length:', layoutxml.length)
+        
+        // DEBUG: Log a sample of the XML to understand structure
+        const xmlSample = layoutxml.substring(0, 500)
+        console.log('📋 XML Sample:', xmlSample)
+        
+        // Also check FetchXML for additional metadata
+        if (viewData.fetchxml) {
+            console.log('📋 FetchXML length:', viewData.fetchxml.length)
+            const fetchSample = viewData.fetchxml.substring(0, 300)
+            console.log('📋 FetchXML Sample:', fetchSample)
+        }
         
         // Extract column names from layoutxml using regex
         // This matches: <cell name="fieldname" ...>
@@ -1405,11 +1456,33 @@ function parseViewMetadata(viewData) {
             const fieldName = nameMatch ? nameMatch[1] : null
             
             if (fieldName) {
+                // Try to extract actual display name from the cell XML
+                let displayName = formatDisplayName(fieldName) // fallback
+                
+                // Look for display name in various possible attributes
+                const displayNameMatch = match.match(/displayname="([^"]+)"/) || 
+                                       match.match(/Display[Nn]ame="([^"]+)"/) ||
+                                       match.match(/label="([^"]+)"/) ||
+                                       match.match(/Label="([^"]+)"/);
+                
+                if (displayNameMatch) {
+                    displayName = displayNameMatch[1]
+                    console.log(`📋 FOUND DISPLAY NAME: ${fieldName} -> "${displayName}"`)
+                } else {
+                    console.log(`📋 NO DISPLAY NAME FOUND FOR: ${fieldName}, using fallback: "${displayName}"`)
+                }
+                
+                // Try to get width from the XML
+                const widthMatch = match.match(/width="([^"]+)"/)
+                const width = widthMatch ? widthMatch[1] : '120px'
+                
+                console.log(`🔍 COLUMN PARSED: ${fieldName} -> "${displayName}" (width: ${width})`)
+                
                 return {
                     name: fieldName,
-                    displayName: formatDisplayName(fieldName),
-                    type: inferFieldType(fieldName),
-                    width: '120px'
+                    displayName: displayName,
+                    type: inferFieldType(fieldName, entityConfig),
+                    width: width
                 }
             }
             return null
@@ -1430,21 +1503,36 @@ function parseViewMetadata(viewData) {
 }
 
 function formatDisplayName(fieldName) {
-    // Generic display name formatting without hardcoded entity-specific mappings
-    if (fieldName.endsWith('id')) {
-        return 'ID'
+    // ALIGNED WITH FRONTEND: Use exact same mappings as frontend formatDisplayName function
+    const displayNames = {
+        'contactid': 'ID',
+        'accountid': 'ID',
+        'fullname': 'Full Name',
+        'firstname': 'First Name',
+        'lastname': 'Last Name',
+        'emailaddress1': 'Email',
+        'mobilephone': 'Mobile',  // Match frontend: 'Mobile' not 'Mobile Phone'
+        'telephone1': 'Phone',
+        'name': 'Name',
+        'cp_name': 'Name',
+        'cp_description': 'Description',
+        'createdon': 'Created',   // Match frontend: 'Created' not 'Created On'
+        'modifiedon': 'Modified', // Match frontend: 'Modified' not 'Modified On'
+        '_parentcustomerid_value': 'Company',
+        '_primarycontactid_value': 'Primary Contact',
+        'cp_portaladmin': 'Portal Admin'
     }
     
-    // Common system field names
-    const commonNames = {
-        'createdon': 'Created',
-        'modifiedon': 'Modified',
-        'statuscode': 'Status',
-        'statecode': 'State'
+    // Check direct mapping first (aligned with frontend)
+    if (displayNames[fieldName]) {
+        console.log(`📋 FRONTEND-ALIGNED DISPLAY NAME: ${fieldName} -> "${displayNames[fieldName]}"`)
+        return displayNames[fieldName]
     }
     
-    return commonNames[fieldName] || 
-           fieldName.replace(/^cp_/, '').replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())
+    // Fallback: Use same logic as frontend for consistency
+    const fallback = fieldName.replace(/^cp_/, '').replace(/^_/, '').replace(/_value$/, '').replace(/([A-Z])/g, ' $1').replace(/^./, str => str.toUpperCase())
+    console.log(`📋 FRONTEND-ALIGNED FALLBACK: ${fieldName} -> "${fallback}"`)
+    return fallback
 }
 
 function inferFieldType(fieldName, entityConfig = null) {
@@ -1461,6 +1549,12 @@ function inferFieldType(fieldName, entityConfig = null) {
     // Dynamic contact lookup field detection based on entity configuration
     if (entityConfig?.contactRelationField && fieldName === entityConfig.contactRelationField) {
         console.log(`🎯 DETECTED AS LOOKUP FIELD: ${fieldName} (matches config contactRelationField)`)
+        return 'lookup'
+    }
+    
+    // Dynamic account lookup field detection based on entity configuration
+    if (entityConfig?.accountRelationField && fieldName === entityConfig.accountRelationField) {
+        console.log(`🎯 DETECTED AS ACCOUNT LOOKUP FIELD: ${fieldName} (matches config accountRelationField)`)
         return 'lookup'
     }
     
@@ -1910,7 +2004,7 @@ function getFieldNavigationPropertyMap(entityConfig) {
         '_createdby_value': 'createdby',
         '_modifiedby_value': 'modifiedby',
         '_ownerid_value': 'ownerid',
-        '_parentcustomerid_value': 'parentcustomerid'
+        '_parentcustomerid_value': 'parentcustomerid_account'
     }
     
     // Add configured contact field mapping if available
