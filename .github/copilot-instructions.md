@@ -3,6 +3,8 @@
 ## Project Overview
 This is a **production-ready React application** demonstrating secure integration between Netlify, Clerk authentication, and Microsoft Dataverse. The system features a **generic entity management architecture** that can handle unlimited custom entities without code changes.
 
+**Key Innovation**: Universal CRUD operations through dynamic entity configuration, eliminating the need for entity-specific code. Add new Dataverse entities by creating configuration records—no coding required.
+
 ## Key Architecture Patterns
 
 ### 🏗️ Generic Entity System (Core Innovation)
@@ -38,12 +40,12 @@ const filter = `statecode eq 0 and _cp_contact_value eq ${userContact.contactid}
 
 ### 🔌 Microsoft Dataverse Integration Patterns
 
-#### Service Principal Authentication (Production Pattern)
+#### Service Principal Authentication (Backend-to-Backend)
 ```javascript
-// functions/auth.js - OAuth 2.0 Client Credentials Flow
+// functions/auth.js - OAuth 2.0 Client Credentials Flow for Dataverse API access
 const tokenEndpoint = `https://login.microsoftonline.com/${TENANT_ID}/oauth2/v2.0/token`
 const scope = `${DATAVERSE_URL}/.default`
-// Returns cached access token for Dataverse API calls
+// Returns cached access token for Dataverse API calls (NOT user authentication)
 ```
 
 #### OData Lookup Field Expansion (Critical Pattern)
@@ -65,12 +67,14 @@ const navigationMap = {
 
 ### 🚀 Local Development (Required Pattern)
 ```bash
-# CRITICAL: Use Netlify CLI (not npm run dev)
+# CRITICAL: Always use Netlify CLI - this is the ONLY way to run locally
 netlify dev  # Injects environment variables, runs functions locally
 
 # Verify setup before development
 netlify status  # Must show linked site for env vars to work
 ```
+
+**Environment Variables**: Functions only work with real environment variables—they won't work locally without `netlify dev`.
 
 ### 📝 Adding New Entities (Zero-Code Pattern)
 1. **Create entity in Dataverse** (cp_project, cp_case, etc.)
@@ -127,6 +131,10 @@ export const handler = async (event) => {
   // Authentication validation
   const user = await validateSimpleAuth(event)
   
+  // SECURITY: Contact GUID requirement (server-side user scoping)
+  const contactGuid = event.queryStringParameters?.contactGuid
+  if (!contactGuid) return createAuthErrorResponse('Contact GUID required', 401)
+  
   // Get environment variables
   const { DATAVERSE_URL } = process.env
   
@@ -134,15 +142,21 @@ export const handler = async (event) => {
   try {
     // Implementation
   } catch (error) {
-    return { statusCode: 500, body: JSON.stringify({ error: error.message }) }
+    return createAuthErrorResponse(`Internal server error: ${error.message}`, 500)
   }
 }
 ```
+
+**Critical Function Utilities**: Always import from `auth-utils.js`:
+- `validateSimpleAuth()` - User authentication
+- `createAuthErrorResponse()` - Consistent error responses  
+- `createSuccessResponse()` - Consistent success responses
 
 ### React Component Structure  
 ```javascript
 import { useState, useEffect } from 'react'
 import { useUser, useAuth } from '@clerk/clerk-react'
+import { getCurrentUserContactGuid } from '../../utils/contactUtils'
 
 function ComponentName() {
   const { user, isLoaded } = useUser()
@@ -152,11 +166,31 @@ function ComponentName() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   
-  // API integration with proper error handling
+  // SECURITY: Always include Contact GUID in API requests
+  const makeSecureApiCall = async (url, options = {}) => {
+    const token = await getToken()
+    const contactGuid = getCurrentUserContactGuid()
+    
+    if (!contactGuid) throw new Error('Contact GUID required')
+    
+    const secureUrl = `${url}${url.includes('?') ? '&' : '?'}contactGuid=${encodeURIComponent(contactGuid)}`
+    
+    return fetch(secureUrl, {
+      ...options,
+      headers: {
+        'Authorization': `Bearer ${token}`,
+        'Content-Type': 'application/json',
+        ...options.headers
+      }
+    })
+  }
+  
   // Tailwind CSS styling only
   // Return JSX
 }
 ```
+
+**Contact Utils Pattern**: Always use `getCurrentUserContactGuid()` and `getCurrentUserContact()` from `contactUtils.js` for secure data access.
 
 ### Lookup Field Display (Critical Pattern)
 ```javascript
@@ -190,6 +224,7 @@ if (field.endsWith('_value')) {
 - **Hardcoded entity logic** - Use the generic entity system
 - **Field names in OData $expand** - Use navigation properties
 - **Unquoted GUIDs** in OData filters - Always wrap in single quotes
+- **API calls without Contact GUID** - Security requirement for all data operations
 
 ### ❌ Development Anti-Patterns
 ```javascript
@@ -202,13 +237,13 @@ const entityConfig = await getEntityConfig(entityName)
 
 ## Environment Variables (Required)
 ```env
-# Azure AD / Dataverse (Backend only)
+# Service Principal for Dataverse API Access (Backend only - NOT user auth)
 TENANT_ID=your-azure-tenant-id
-CLIENT_ID=your-app-registration-id  
-CLIENT_SECRET=your-app-secret
+CLIENT_ID=your-service-principal-client-id  
+CLIENT_SECRET=your-service-principal-secret
 DATAVERSE_URL=https://yourorg.crm.dynamics.com
 
-# Clerk Authentication (Frontend + Backend)
+# Clerk.dev User Authentication (Frontend + Backend)
 VITE_CLERK_PUBLISHABLE_KEY=pk_live_...
 CLERK_SECRET_KEY=sk_live_...
 ```
@@ -232,26 +267,26 @@ CLERK_SECRET_KEY=sk_live_...
 
 ## Integration Points
 
-### Clerk.dev → React App
+### Clerk.dev → React App (User Authentication Only)
 ```javascript
-// main.jsx - App initialization
+// main.jsx - Clerk is the ONLY authentication provider for users
 <ClerkProvider publishableKey={import.meta.env.VITE_CLERK_PUBLISHABLE_KEY}>
   <BrowserRouter><App /></BrowserRouter>
 </ClerkProvider>
 ```
 
-### Netlify Functions → Dataverse
+### Netlify Functions → Dataverse (Service Principal Only)
 ```javascript
-// Service Principal pattern
+// Service Principal authentication for API access (NOT user authentication)
 const accessToken = await getAccessToken()  // From auth.js
 const response = await fetch(`${DATAVERSE_URL}/api/data/v9.0/entities`, {
   headers: { 'Authorization': `Bearer ${accessToken}` }
 })
 ```
 
-### React → Netlify Functions  
+### React → Netlify Functions (Clerk Tokens)
 ```javascript
-// API call pattern
+// API call pattern using Clerk tokens for user verification
 const token = await getToken()  // Clerk token for function auth
 const response = await fetch('/.netlify/functions/generic-entity', {
   headers: { 'Authorization': `Bearer ${token}` }

@@ -5,10 +5,10 @@ import { BrowserRouter } from 'react-router-dom'
 import App from './App.jsx'
 import './index.css'
 
-// Development connection monitoring
-if (import.meta.env.DEV) {
-    import('./dev-monitor.js')
-}
+// Development connection monitoring - temporarily disabled
+// if (import.meta.env.DEV) {
+//     import('./dev-monitor.js')
+// }
 
 // Import Clerk publishable key
 const PUBLISHABLE_KEY = import.meta.env.VITE_CLERK_PUBLISHABLE_KEY
@@ -30,14 +30,36 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     // Only use StrictMode in development for debugging
     isDevelopment ? (
         <React.StrictMode>
-            <ClerkProvider publishableKey={PUBLISHABLE_KEY}>
+            <ClerkProvider 
+                publishableKey={PUBLISHABLE_KEY}
+                routerPush={(to) => window.history.pushState(null, '', to)}
+                routerReplace={(to) => window.history.replaceState(null, '', to)}
+                signUpUrl="/"
+                signInUrl="/"
+                afterSignUpUrl="/welcome"
+                afterSignInUrl="/welcome"
+                signUpFallbackRedirectUrl="/welcome"
+                signInFallbackRedirectUrl="/welcome"
+                allowedRedirectOrigins={[window.location.origin]}
+            >
                 <BrowserRouter future={routerFutureFlags}>
                     <App />
                 </BrowserRouter>
             </ClerkProvider>
         </React.StrictMode>
     ) : (
-        <ClerkProvider publishableKey={PUBLISHABLE_KEY}>
+        <ClerkProvider 
+            publishableKey={PUBLISHABLE_KEY}
+            routerPush={(to) => window.history.pushState(null, '', to)}
+            routerReplace={(to) => window.history.replaceState(null, '', to)}
+            signUpUrl="/"
+            signInUrl="/"
+            afterSignUpUrl="/welcome"
+            afterSignInUrl="/welcome"
+            signUpFallbackRedirectUrl="/welcome"
+            signInFallbackRedirectUrl="/welcome"
+            allowedRedirectOrigins={[window.location.origin]}
+        >
             <BrowserRouter future={routerFutureFlags}>
                 <App />
             </BrowserRouter>

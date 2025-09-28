@@ -63,7 +63,6 @@ function DynamicSidebar() {
     }
 
     const buildMenuItems = (configs) => {
-        
         // Start with core menu items
         const coreItems = [
             {

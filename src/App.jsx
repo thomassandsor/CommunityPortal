@@ -1,6 +1,6 @@
 import { Routes, Route } from 'react-router-dom'
 import { SignedIn, SignedOut } from '@clerk/clerk-react'
-import ContactChecker from './components/shared/ContactChecker'
+import SmartContactWrapper from './components/shared/SmartContactWrapper'
 import Landing from './pages/shared/Landing'
 import Welcome from './pages/shared/Welcome'
 import ContactEdit from './pages/contacts/ContactEdit'
@@ -21,9 +21,9 @@ function App() {
                             <Landing />
                         </SignedOut>
                         <SignedIn>
-                            <ContactChecker>
+                            <SmartContactWrapper>
                                 <Welcome />
-                            </ContactChecker>
+                            </SmartContactWrapper>
                         </SignedIn>
                     </>
                 } />
@@ -31,9 +31,9 @@ function App() {
                 {/* Protected routes */}
                 <Route path="/welcome" element={
                     <SignedIn>
-                        <ContactChecker>
+                        <SmartContactWrapper>
                             <Welcome />
-                        </ContactChecker>
+                        </SmartContactWrapper>
                     </SignedIn>
                 } />
 
