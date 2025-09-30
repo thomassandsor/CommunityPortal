@@ -195,10 +195,10 @@ export const handler = async (event) => {
  * Get entity metadata from Dataverse to understand field types and names
  */
 async function getEntityMetadata(accessToken, entityLogicalName) {
-    const { DATAVERSE_URL } = process.env
+    // Using process.env.DATAVERSE_URL directly to avoid initialization issues
     
     // Get entity metadata including attributes and relationships
-    const url = `${DATAVERSE_URL}/api/data/v9.0/EntityDefinitions?$filter=LogicalName eq '${entityLogicalName}'&$expand=Attributes($select=LogicalName,AttributeType,AttributeTypeName),OneToManyRelationships($select=ReferencingAttribute,ReferencingEntity,ReferencingEntityNavigationPropertyName),ManyToOneRelationships($select=ReferencingAttribute,ReferencingEntity,ReferencingEntityNavigationPropertyName)`
+    const url = `${process.env.DATAVERSE_URL}/api/data/v9.0/EntityDefinitions?$filter=LogicalName eq '${entityLogicalName}'&$expand=Attributes($select=LogicalName,AttributeType,AttributeTypeName),OneToManyRelationships($select=ReferencingAttribute,ReferencingEntity,ReferencingEntityNavigationPropertyName),ManyToOneRelationships($select=ReferencingAttribute,ReferencingEntity,ReferencingEntityNavigationPropertyName)`
     
     console.log('🔍 Fetching entity metadata for:', entityLogicalName)
     console.log('🌐 Metadata URL:', url)
@@ -234,7 +234,7 @@ async function getEntityMetadata(accessToken, entityLogicalName) {
  * Handle list request - get entities with view metadata
  */
 async function handleListRequest(accessToken, entityConfig, userContact, viewMode = 'personal', origin = null, event = null) {
-    const { DATAVERSE_URL } = process.env
+    // Using process.env.DATAVERSE_URL directly to avoid initialization issues
     
     // 🔒 SECURITY: Pagination limits to prevent DoS and memory exhaustion
     const MAX_RECORDS = 100  // Hard limit - never exceed this
@@ -287,7 +287,7 @@ async function handleListRequest(accessToken, entityConfig, userContact, viewMod
     const finalSelect = select && select.trim() ? select : getDefaultEntityFields(entityConfig.entityLogicalName)
 
     // Build the URL using unified pattern for all entities with pagination
-    let url = `${DATAVERSE_URL}/api/data/v9.0/${getEntitySetName(entityConfig.entityLogicalName)}?$filter=${encodeURIComponent(securityFilter)}&$orderby=createdon desc&$top=${requestedTop}`
+    let url = `${process.env.DATAVERSE_URL}/api/data/v9.0/${getEntitySetName(entityConfig.entityLogicalName)}?$filter=${encodeURIComponent(securityFilter)}&$orderby=createdon desc&$top=${requestedTop}`
     
     // Add skip if pagination is used
     if (skip > 0) {
@@ -393,7 +393,7 @@ async function handleFormMetadataRequest(accessToken, entityConfig, userContact,
 async function handleSingleEntityRequest(accessToken, entityConfig, userContact, entityId, origin = null) {
     console.log(`🔍 Fetching single ${entityConfig.entityLogicalName}: ${entityId} for user: ${userContact.contactid}`)
     
-    const { DATAVERSE_URL } = process.env
+    // Using process.env.DATAVERSE_URL directly to avoid initialization issues
     
     // SECURITY ENHANCEMENT: Build mandatory user-scoped security filter
     const securityFilter = await buildEntitySecurityFilter(accessToken, entityConfig, userContact, 'personal')
@@ -478,7 +478,7 @@ async function handleSingleEntityRequest(accessToken, entityConfig, userContact,
     console.log(`🎯 SINGLE ENTITY: Final select with ALL fields: ${select}`)
     console.log(`🎯 SINGLE ENTITY: Final expand: ${expand}`)
     
-    let url = `${DATAVERSE_URL}/api/data/v9.2/${getEntitySetName(entityConfig.entityLogicalName)}?$filter=${encodeURIComponent(filter)}&$select=${select}`
+    let url = `${process.env.DATAVERSE_URL}/api/data/v9.2/${getEntitySetName(entityConfig.entityLogicalName)}?$filter=${encodeURIComponent(filter)}&$select=${select}`
     if (expand) {
         url += `&$expand=${encodeURIComponent(expand)}`
     }
@@ -574,8 +574,8 @@ async function handleCreateRequest(accessToken, entityConfig, userContact, reque
         console.log(`🛡️ SECURITY: Admin creating system entity ${entityConfig.entityLogicalName}`)
     }
 
-    const { DATAVERSE_URL } = process.env
-    const url = `${DATAVERSE_URL}/api/data/v9.0/${getEntitySetName(entityConfig.entityLogicalName)}`
+    // Using process.env.DATAVERSE_URL directly to avoid initialization issues
+    const url = `${process.env.DATAVERSE_URL}/api/data/v9.0/${getEntitySetName(entityConfig.entityLogicalName)}`
     
     console.log(`🧹 Sanitized data for create:`, sanitizedData)
     
@@ -859,7 +859,7 @@ async function handleUpdateRequest(accessToken, entityConfig, userContact, entit
         
         console.log(`🛡️ SECURITY: Verifying user ownership before update - ${verifyFilter}`)
         
-        const verifyUrl = `${DATAVERSE_URL}/api/data/v9.2/${getEntitySetName(entityConfig.entityLogicalName)}?$filter=${encodeURIComponent(verifyFilter)}&$select=${idField}`
+        const verifyUrl = `${process.env.DATAVERSE_URL}/api/data/v9.2/${getEntitySetName(entityConfig.entityLogicalName)}?$filter=${encodeURIComponent(verifyFilter)}&$select=${idField}`
         const verifyResponse = await fetch(verifyUrl, {
             method: 'GET',
             headers: {
@@ -902,8 +902,8 @@ async function handleUpdateRequest(accessToken, entityConfig, userContact, entit
     // Sanitize data based on form metadata
     const sanitizedData = sanitizeDataForDataverse(data, entityConfig, formMetadata)
     
-    const { DATAVERSE_URL } = process.env
-    const url = `${DATAVERSE_URL}/api/data/v9.0/${getEntitySetName(entityConfig.entityLogicalName)}(${entityId})`
+    // Using process.env.DATAVERSE_URL directly to avoid initialization issues
+    const url = `${process.env.DATAVERSE_URL}/api/data/v9.0/${getEntitySetName(entityConfig.entityLogicalName)}(${entityId})`
     
     console.log(`🧹 Sanitized data for update:`, sanitizedData)
     
@@ -941,7 +941,7 @@ async function handleUpdateRequest(accessToken, entityConfig, userContact, entit
 async function handleDeleteRequest(accessToken, entityConfig, userContact, entityId, origin = null) {
     console.log(`🗑️ Deleting ${entityConfig.entityLogicalName}: ${entityId} for user: ${userContact.contactid}`)
     
-    const { DATAVERSE_URL } = process.env
+    // Using process.env.DATAVERSE_URL directly to avoid initialization issues
     
     // SECURITY ENHANCEMENT: Verify user owns the record before delete (when contact available)
     if (entityConfig.contactRelationField && userContact && userContact.contactid) {
@@ -951,7 +951,7 @@ async function handleDeleteRequest(accessToken, entityConfig, userContact, entit
         
         console.log(`🛡️ SECURITY: Verifying user ownership before delete - ${verifyFilter}`)
         
-        const verifyUrl = `${DATAVERSE_URL}/api/data/v9.2/${getEntitySetName(entityConfig.entityLogicalName)}?$filter=${encodeURIComponent(verifyFilter)}&$select=${idField}`
+        const verifyUrl = `${process.env.DATAVERSE_URL}/api/data/v9.2/${getEntitySetName(entityConfig.entityLogicalName)}?$filter=${encodeURIComponent(verifyFilter)}&$select=${idField}`
         const verifyResponse = await fetch(verifyUrl, {
             method: 'GET',
             headers: {
@@ -977,7 +977,7 @@ async function handleDeleteRequest(accessToken, entityConfig, userContact, entit
         console.warn(`🛡️ SECURITY: Deleting ${entityConfig.entityLogicalName} without ownership verification (no contact or no contact relation field)`)
     }
     
-    const url = `${DATAVERSE_URL}/api/data/v9.0/${getEntitySetName(entityConfig.entityLogicalName)}(${entityId})`
+    const url = `${process.env.DATAVERSE_URL}/api/data/v9.0/${getEntitySetName(entityConfig.entityLogicalName)}(${entityId})`
     
     const response = await fetch(url, {
         method: 'DELETE',
@@ -1010,11 +1010,11 @@ async function handleDeleteRequest(accessToken, entityConfig, userContact, entit
  * @returns {Promise<string[]>} Array of contact GUIDs
  */
 async function getAccountContactIds(accessToken, accountGuid) {
-    const { DATAVERSE_URL } = process.env
+    // Using process.env.DATAVERSE_URL directly to avoid initialization issues
     
     const filter = `_parentcustomerid_value eq '${accountGuid}' and statecode eq 0`
     const select = 'contactid'
-    const url = `${DATAVERSE_URL}/api/data/v9.0/contacts?$filter=${encodeURIComponent(filter)}&$select=${select}`
+    const url = `${process.env.DATAVERSE_URL}/api/data/v9.0/contacts?$filter=${encodeURIComponent(filter)}&$select=${select}`
     
     try {
         const response = await fetch(url, {
@@ -1425,9 +1425,9 @@ async function buildSmartQueryFromMetadata(viewMetadata, entityConfig) {
  * Get view metadata (reuse from organization function)
  */
 async function getViewMetadata(accessToken, viewGuid, entityConfig = null) {
-    const { DATAVERSE_URL } = process.env
+    // Using process.env.DATAVERSE_URL directly to avoid initialization issues
     
-    const url = `${DATAVERSE_URL}/api/data/v9.0/savedqueries(${viewGuid})?$select=name,description,layoutxml,fetchxml`
+    const url = `${process.env.DATAVERSE_URL}/api/data/v9.0/savedqueries(${viewGuid})?$select=name,description,layoutxml,fetchxml`
     
     const response = await fetch(url, {
         method: 'GET',
@@ -1452,9 +1452,9 @@ async function getViewMetadata(accessToken, viewGuid, entityConfig = null) {
  * Get form metadata (reuse from organization function)
  */
 async function getFormMetadata(accessToken, formGuid) {
-    const { DATAVERSE_URL } = process.env
+    // Using process.env.DATAVERSE_URL directly to avoid initialization issues
     
-    const url = `${DATAVERSE_URL}/api/data/v9.0/systemforms(${formGuid})?$select=name,description,formxml`
+    const url = `${process.env.DATAVERSE_URL}/api/data/v9.0/systemforms(${formGuid})?$select=name,description,formxml`
     
     const response = await fetch(url, {
         method: 'GET',
@@ -1911,10 +1911,10 @@ function inferControlType(fieldName, classType) {
  * Get user contact information by GUID - SECURE DIRECT LOOKUP
  */
 async function getUserContactByGuid(accessToken, contactGuid) {
-    const { DATAVERSE_URL } = process.env
+    // Using process.env.DATAVERSE_URL directly to avoid initialization issues
     
     // Direct GUID lookup - most secure approach
-    const url = `${DATAVERSE_URL}/api/data/v9.0/contacts(${contactGuid})?$select=contactid,cp_portaladmin,_parentcustomerid_value`
+    const url = `${process.env.DATAVERSE_URL}/api/data/v9.0/contacts(${contactGuid})?$select=contactid,cp_portaladmin,_parentcustomerid_value`
 
     console.log(`🔍 SECURITY: Looking up contact by GUID: ${contactGuid}`)
     
@@ -1946,11 +1946,11 @@ async function getUserContactByGuid(accessToken, contactGuid) {
  * Get user contact information (legacy email-based lookup - deprecated)
  */
 async function getUserContact(accessToken, userEmail) {
-    const { DATAVERSE_URL } = process.env
+    // Using process.env.DATAVERSE_URL directly to avoid initialization issues
     
     const filter = buildSecureEmailFilter(userEmail)
     const select = 'contactid,cp_portaladmin,_parentcustomerid_value'
-    const url = `${DATAVERSE_URL}/api/data/v9.0/contacts?$filter=${encodeURIComponent(filter)}&$select=${select}`
+    const url = `${process.env.DATAVERSE_URL}/api/data/v9.0/contacts?$filter=${encodeURIComponent(filter)}&$select=${select}`
 
     const response = await fetch(url, {
         method: 'GET',
