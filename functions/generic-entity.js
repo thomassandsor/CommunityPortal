@@ -18,7 +18,7 @@
  * - Admin permission checks
  */
 
-import { validateSimpleAuth, createAuthErrorResponse, createSuccessResponse, buildSecureEmailFilter, sanitizeGuid, isValidGuid, validateContactOwnership, getSecureCorsHeaders, checkRateLimit, createRateLimitResponse, createSafeErrorResponse } from './auth-utils.js'
+import { validateSimpleAuth, createAuthErrorResponse, createSuccessResponse, buildSecureEmailFilter, sanitizeGuid, isValidGuid, validateContactOwnership, getSecureCorsHeaders, checkRateLimit, createRateLimitResponse, createSafeErrorResponse, fetchWithTimeout } from './auth-utils.js'
 
 export const handler = async (event) => {
     // Get origin for CORS
@@ -203,7 +203,7 @@ async function getEntityMetadata(accessToken, entityLogicalName) {
     console.log('🔍 Fetching entity metadata for:', entityLogicalName)
     console.log('🌐 Metadata URL:', url)
     
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
         method: 'GET',
         headers: {
             'Authorization': `Bearer ${accessToken}`,
@@ -211,7 +211,7 @@ async function getEntityMetadata(accessToken, entityLogicalName) {
             'OData-Version': '4.0',
             'Accept': 'application/json',
         },
-    })
+    }, 30000)  // 30s timeout for Dataverse API calls
 
     if (!response.ok) {
         const errorText = await response.text()
@@ -317,7 +317,7 @@ async function handleListRequest(accessToken, entityConfig, userContact, viewMod
     console.log(`🔍 Expand: ${expand}`)
     console.log(`🔍 Complete URL: ${url}`)
 
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
         method: 'GET',
         headers: {
             'Authorization': `Bearer ${accessToken}`,
@@ -326,7 +326,7 @@ async function handleListRequest(accessToken, entityConfig, userContact, viewMod
             'Accept': 'application/json',
             'Prefer': 'odata.include-annotations="*"'  // Include count
         },
-    })
+    }, 30000)  // 30s timeout for Dataverse API calls
 
     if (!response.ok) {
         const errorText = await response.text()
@@ -485,7 +485,7 @@ async function handleSingleEntityRequest(accessToken, entityConfig, userContact,
     
     console.log(`🔍 SINGLE ENTITY: Complete URL: ${url}`)
     
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
         method: 'GET',
         headers: {
             'Authorization': `Bearer ${accessToken}`,
@@ -493,7 +493,7 @@ async function handleSingleEntityRequest(accessToken, entityConfig, userContact,
             'OData-Version': '4.0',
             'Accept': 'application/json',
         },
-    })
+    }, 30000)  // 30s timeout
 
     if (!response.ok) {
         const errorText = await response.text()
@@ -579,7 +579,7 @@ async function handleCreateRequest(accessToken, entityConfig, userContact, reque
     
     console.log(`🧹 Sanitized data for create:`, sanitizedData)
     
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
         method: 'POST',
         headers: {
             'Authorization': `Bearer ${accessToken}`,
@@ -589,7 +589,7 @@ async function handleCreateRequest(accessToken, entityConfig, userContact, reque
             'Accept': 'application/json',
         },
         body: JSON.stringify(sanitizedData)
-    })
+    }, 30000)  // 30s timeout
 
     if (!response.ok) {
         const errorText = await response.text()
@@ -860,7 +860,7 @@ async function handleUpdateRequest(accessToken, entityConfig, userContact, entit
         console.log(`🛡️ SECURITY: Verifying user ownership before update - ${verifyFilter}`)
         
         const verifyUrl = `${process.env.DATAVERSE_URL}/api/data/v9.2/${getEntitySetName(entityConfig.entityLogicalName)}?$filter=${encodeURIComponent(verifyFilter)}&$select=${idField}`
-        const verifyResponse = await fetch(verifyUrl, {
+        const verifyResponse = await fetchWithTimeout(verifyUrl, {
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${accessToken}`,
@@ -907,7 +907,7 @@ async function handleUpdateRequest(accessToken, entityConfig, userContact, entit
     
     console.log(`🧹 Sanitized data for update:`, sanitizedData)
     
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
         method: 'PATCH',
         headers: {
             'Authorization': `Bearer ${accessToken}`,
@@ -917,7 +917,7 @@ async function handleUpdateRequest(accessToken, entityConfig, userContact, entit
             'Accept': 'application/json',
         },
         body: JSON.stringify(sanitizedData)
-    })
+    }, 30000)  // 30s timeout for Dataverse API calls
 
     if (!response.ok) {
         const errorText = await response.text()
@@ -952,7 +952,7 @@ async function handleDeleteRequest(accessToken, entityConfig, userContact, entit
         console.log(`🛡️ SECURITY: Verifying user ownership before delete - ${verifyFilter}`)
         
         const verifyUrl = `${process.env.DATAVERSE_URL}/api/data/v9.2/${getEntitySetName(entityConfig.entityLogicalName)}?$filter=${encodeURIComponent(verifyFilter)}&$select=${idField}`
-        const verifyResponse = await fetch(verifyUrl, {
+        const verifyResponse = await fetchWithTimeout(verifyUrl, {
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${accessToken}`,
@@ -979,14 +979,14 @@ async function handleDeleteRequest(accessToken, entityConfig, userContact, entit
     
     const url = `${process.env.DATAVERSE_URL}/api/data/v9.0/${getEntitySetName(entityConfig.entityLogicalName)}(${entityId})`
     
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
         method: 'DELETE',
         headers: {
             'Authorization': `Bearer ${accessToken}`,
             'OData-MaxVersion': '4.0',
             'OData-Version': '4.0',
         },
-    })
+    }, 30000)  // 30s timeout
 
     if (!response.ok) {
         const errorText = await response.text()
@@ -1017,7 +1017,7 @@ async function getAccountContactIds(accessToken, accountGuid) {
     const url = `${process.env.DATAVERSE_URL}/api/data/v9.0/contacts?$filter=${encodeURIComponent(filter)}&$select=${select}`
     
     try {
-        const response = await fetch(url, {
+        const response = await fetchWithTimeout(url, {
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${accessToken}`,
@@ -1429,7 +1429,7 @@ async function getViewMetadata(accessToken, viewGuid, entityConfig = null) {
     
     const url = `${process.env.DATAVERSE_URL}/api/data/v9.0/savedqueries(${viewGuid})?$select=name,description,layoutxml,fetchxml`
     
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
         method: 'GET',
         headers: {
             'Authorization': `Bearer ${accessToken}`,
@@ -1437,7 +1437,7 @@ async function getViewMetadata(accessToken, viewGuid, entityConfig = null) {
             'OData-Version': '4.0',
             'Accept': 'application/json',
         },
-    })
+    }, 30000)  // 30s timeout
 
     if (!response.ok) {
         console.warn('Failed to fetch view metadata:', response.status)
@@ -1456,7 +1456,7 @@ async function getFormMetadata(accessToken, formGuid) {
     
     const url = `${process.env.DATAVERSE_URL}/api/data/v9.0/systemforms(${formGuid})?$select=name,description,formxml`
     
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
         method: 'GET',
         headers: {
             'Authorization': `Bearer ${accessToken}`,
@@ -1464,7 +1464,7 @@ async function getFormMetadata(accessToken, formGuid) {
             'OData-Version': '4.0',
             'Accept': 'application/json',
         },
-    })
+    }, 30000)  // 30s timeout
 
     if (!response.ok) {
         console.warn('Failed to fetch form metadata:', response.status)
@@ -1918,7 +1918,7 @@ async function getUserContactByGuid(accessToken, contactGuid) {
 
     console.log(`🔍 SECURITY: Looking up contact by GUID: ${contactGuid}`)
     
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
         method: 'GET',
         headers: {
             'Authorization': `Bearer ${accessToken}`,
@@ -1926,7 +1926,7 @@ async function getUserContactByGuid(accessToken, contactGuid) {
             'OData-Version': '4.0',
             'Accept': 'application/json',
         },
-    })
+    }, 30000)  // 30s timeout
 
     if (!response.ok) {
         if (response.status === 404) {
@@ -1952,7 +1952,7 @@ async function getUserContact(accessToken, userEmail) {
     const select = 'contactid,cp_portaladmin,_parentcustomerid_value'
     const url = `${process.env.DATAVERSE_URL}/api/data/v9.0/contacts?$filter=${encodeURIComponent(filter)}&$select=${select}`
 
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
         method: 'GET',
         headers: {
             'Authorization': `Bearer ${accessToken}`,
@@ -1960,7 +1960,7 @@ async function getUserContact(accessToken, userEmail) {
             'OData-Version': '4.0',
             'Accept': 'application/json',
         },
-    })
+    }, 30000)  // 30s timeout
 
     if (!response.ok) {
         console.error('Failed to fetch user contact')
@@ -2007,7 +2007,7 @@ async function resolveEntityName(urlPathOrName, accessToken) {
         
         console.log('🔍 RESOLVE ENTITY NAME: Querying Dataverse for configs...')
         
-        const response = await fetch(url, {
+        const response = await fetchWithTimeout(url, {
             method: 'GET',
             headers: {
                 'Authorization': `Bearer ${accessToken}`,

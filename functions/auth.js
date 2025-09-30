@@ -13,9 +13,10 @@
  * - Environment variable validation
  * - Request logging without sensitive data
  * - Secure CORS configuration
+ * - Request timeout protection (10s for auth endpoints)
  */
 
-import { getSecureCorsHeaders } from './auth-utils.js'
+import { getSecureCorsHeaders, fetchWithTimeout } from './auth-utils.js'
 
 // In-memory token cache (use Redis/database in production for multi-instance deployments)
 let tokenCache = {
@@ -92,14 +93,14 @@ export const handler = async (event) => {
 
         console.log('Requesting new access token from Azure AD...')
 
-        // Make the token request
-        const response = await fetch(tokenUrl, {
+        // Make the token request with 10-second timeout (auth endpoints should be fast)
+        const response = await fetchWithTimeout(tokenUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
             },
             body: body.toString()
-        })
+        }, 10000) // 10 second timeout for auth requests
 
         if (!response.ok) {
             const errorText = await response.text()
@@ -154,6 +155,18 @@ export const handler = async (event) => {
 
     } catch (error) {
         console.error('Auth function error:', error)
+        
+        // 🔒 SECURITY: Handle timeout errors explicitly
+        if (error.isTimeout) {
+            return {
+                statusCode: 504,
+                headers: getSecureCorsHeaders(origin),
+                body: JSON.stringify({
+                    error: 'Gateway timeout',
+                    details: 'Authentication request timed out. Please try again.'
+                }),
+            }
+        }
 
         return {
             statusCode: 500,

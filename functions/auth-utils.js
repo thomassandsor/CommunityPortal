@@ -42,6 +42,46 @@ const ERROR_MESSAGES = {
 }
 
 /**
+ * 🔒 SECURITY: Fetch with timeout to prevent hanging requests
+ * Wraps standard fetch with configurable timeout protection
+ * Prevents resource exhaustion from slow or unresponsive external APIs
+ * 
+ * @param {string} url - The URL to fetch
+ * @param {Object} options - Fetch options (headers, method, body, etc.)
+ * @param {number} timeoutMs - Timeout in milliseconds (default: 30000 = 30 seconds)
+ * @returns {Promise<Response>} - Fetch response or timeout error
+ * 
+ * @example
+ * const response = await fetchWithTimeout(url, { method: 'GET', headers }, 10000)
+ */
+export async function fetchWithTimeout(url, options = {}, timeoutMs = 30000) {
+    const controller = new AbortController()
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs)
+    
+    try {
+        const response = await fetch(url, {
+            ...options,
+            signal: controller.signal
+        })
+        clearTimeout(timeoutId)
+        return response
+    } catch (error) {
+        clearTimeout(timeoutId)
+        
+        // Check if error was due to timeout/abort
+        if (error.name === 'AbortError') {
+            const timeoutError = new Error(`Request timed out after ${timeoutMs}ms`)
+            timeoutError.name = 'TimeoutError'
+            timeoutError.isTimeout = true
+            throw timeoutError
+        }
+        
+        // Re-throw other errors (network issues, etc.)
+        throw error
+    }
+}
+
+/**
  * 🔒 SECURITY: Rate limiting middleware to prevent abuse and DoS attacks
  * Tracks requests per identifier (IP or user ID) with automatic cleanup
  * 
