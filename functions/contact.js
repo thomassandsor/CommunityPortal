@@ -32,6 +32,7 @@ import {
     createSafeErrorResponse,
     withErrorHandling
 } from './auth-utils.js'
+import { logDebug, logError, logWarn } from './logger.js'
 
 // Security helper functions
 function validateEmail(email) {
@@ -119,14 +120,14 @@ export const handler = async (event) => {
         const { DATAVERSE_URL, CONTACT_VIEW_GUID, CONTACT_FORM_GUID } = process.env
 
         if (!DATAVERSE_URL) {
-            console.error('Missing DATAVERSE_URL environment variable')
+            logError('Missing DATAVERSE_URL environment variable')
             return createAuthErrorResponse('Server configuration error', 500, origin)
         }
 
         // Log available environment variables for debugging (first occurrence)
-        console.log(`🔧 Environment check - DATAVERSE_URL: ${DATAVERSE_URL ? 'Set' : 'Missing'}`)
-        console.log(`🔧 Environment check - CONTACT_VIEW_GUID: ${CONTACT_VIEW_GUID ? 'Set' : 'Missing'}`)
-        console.log(`🔧 Environment check - CONTACT_FORM_GUID: ${CONTACT_FORM_GUID ? 'Set' : 'Missing'}`)
+        logDebug(`🔧 Environment check - DATAVERSE_URL: ${DATAVERSE_URL ? 'Set' : 'Missing'}`)
+        logDebug(`🔧 Environment check - CONTACT_VIEW_GUID: ${CONTACT_VIEW_GUID ? 'Set' : 'Missing'}`)
+        logDebug(`🔧 Environment check - CONTACT_FORM_GUID: ${CONTACT_FORM_GUID ? 'Set' : 'Missing'}`)
 
         // Get access token by calling our auth function
         const accessToken = await getAccessToken()
@@ -156,7 +157,7 @@ export const handler = async (event) => {
                 return createEmailVerificationErrorResponse(verificationCheck, origin)
             }
 
-            console.log(`${isAdmin ? 'Admin' : 'User'} ${userEmail} looking up contact: ${requestedEmail}`)
+            logDebug(`${isAdmin ? 'Admin' : 'User'} ${userEmail} looking up contact: ${requestedEmail}`)
 
             // Security: Use secure email sanitization and filter building
             const sanitizedEmail = sanitizeEmail(requestedEmail)
@@ -177,7 +178,7 @@ export const handler = async (event) => {
 
             if (!response.ok) {
                 const errorText = await response.text()
-                console.error('Dataverse GET request failed:', response.status, errorText)
+                logError('Dataverse GET request failed:', response.status, errorText)
                 return createAuthErrorResponse('Failed to fetch contact from Dataverse', response.status, origin)
             }
 
@@ -189,7 +190,7 @@ export const handler = async (event) => {
                 clearEmailVerificationAttempts(requestedEmail)
             }
 
-            console.log(`Found ${data.value?.length || 0} contacts for email: ${requestedEmail}`)
+            logDebug(`Found ${data.value?.length || 0} contacts for email: ${requestedEmail}`)
 
             return createSuccessResponse({
                 contact,
@@ -232,7 +233,7 @@ export const handler = async (event) => {
 
             // Update existing contact
             if (contactData.contactid) {
-                console.log(`Authenticated user ${userEmail} updating contact: ${contactData.contactid}`)
+                logDebug(`Authenticated user ${userEmail} updating contact: ${contactData.contactid}`)
 
                 const url = `${DATAVERSE_URL}/api/data/v9.0/contacts(${contactData.contactid})`
 
@@ -249,17 +250,17 @@ export const handler = async (event) => {
 
                 if (!response.ok) {
                     const errorText = await response.text()
-                    console.error('Dataverse PATCH request failed:', response.status, errorText)
+                    logError('Dataverse PATCH request failed:', response.status, errorText)
                     return createAuthErrorResponse('Failed to update contact in Dataverse', response.status, origin)
                 }
 
                 // For PATCH requests, return the updated contact
                 result = { ...contact, contactid: contactData.contactid }
-                console.log(`Contact updated successfully for user: ${userEmail}`)
+                logDebug(`Contact updated successfully for user: ${userEmail}`)
 
             } else {
                 // Create new contact
-                console.log(`Authenticated user ${userEmail} creating new contact`)
+                logDebug(`Authenticated user ${userEmail} creating new contact`)
 
                 const url = `${DATAVERSE_URL}/api/data/v9.0/contacts`
 
@@ -277,12 +278,12 @@ export const handler = async (event) => {
 
                 if (!response.ok) {
                     const errorText = await response.text()
-                    console.error('Dataverse POST request failed:', response.status, errorText)
+                    logError('Dataverse POST request failed:', response.status, errorText)
                     return createAuthErrorResponse('Failed to create contact in Dataverse', response.status, origin)
                 }
 
                 result = await response.json()
-                console.log(`Contact created successfully for user ${userEmail} with ID:`, result.contactid)
+                logDebug(`Contact created successfully for user ${userEmail} with ID:`, result.contactid)
             }
 
             // 🔒 SECURITY: Clear verification attempts on successful contact creation/update
@@ -325,12 +326,12 @@ async function getAccessToken() {
             const authData = JSON.parse(authResult.body)
             return authData.access_token
         } else {
-            console.error('Auth function failed:', authResult.statusCode, authResult.body)
+            logError('Auth function failed:', authResult.statusCode, authResult.body)
             return null
         }
 
     } catch (error) {
-        console.error('Error getting access token:', error)
+        logError('Error getting access token:', error)
         return null
     }
 }
@@ -360,14 +361,14 @@ async function getUserAdminStatus(userEmail) {
         if (response.ok) {
             const data = await response.json()
             const isAdmin = data.value?.[0]?.cp_portaladmin || false
-            console.log(`User ${userEmail} admin status: ${isAdmin}`)
+            logDebug(`User ${userEmail} admin status: ${isAdmin}`)
             return isAdmin
         }
         
-        console.log(`Could not determine admin status for ${userEmail}, defaulting to false`)
+        logDebug(`Could not determine admin status for ${userEmail}, defaulting to false`)
         return false
     } catch (error) {
-        console.error('Error checking admin status:', error)
+        logError('Error checking admin status:', error)
         return false // Default to non-admin on error
     }
 }

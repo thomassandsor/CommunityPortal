@@ -17,6 +17,7 @@
  */
 
 import { getSecureCorsHeaders, fetchWithTimeout } from './auth-utils.js'
+import { logDebug, logError } from './logger.js'
 
 // In-memory token cache (use Redis/database in production for multi-instance deployments)
 let tokenCache = {
@@ -49,7 +50,7 @@ export const handler = async (event) => {
 
         // Validate required environment variables
         if (!TENANT_ID || !CLIENT_ID || !CLIENT_SECRET || !DATAVERSE_URL) {
-            console.error('Missing required environment variables')
+            logError('Missing required environment variables')
             return {
                 statusCode: 500,
                 headers: getSecureCorsHeaders(origin),
@@ -67,7 +68,7 @@ export const handler = async (event) => {
             tokenCache.expiry > Date.now() &&
             tokenCache.scope === currentScope) {
 
-            console.log('Returning cached access token')
+            logDebug('Returning cached access token')
             return {
                 statusCode: 200,
                 headers: getSecureCorsHeaders(origin),
@@ -91,7 +92,7 @@ export const handler = async (event) => {
             scope: currentScope
         })
 
-        console.log('Requesting new access token from Azure AD...')
+        logDebug('Requesting new access token from Azure AD...')
 
         // Make the token request with 10-second timeout (auth endpoints should be fast)
         const response = await fetchWithTimeout(tokenUrl, {
@@ -104,7 +105,7 @@ export const handler = async (event) => {
 
         if (!response.ok) {
             const errorText = await response.text()
-            console.error('Token request failed:', response.status, errorText)
+            logError('Token request failed:', response.status, errorText)
 
             return {
                 statusCode: 401,
@@ -120,7 +121,7 @@ export const handler = async (event) => {
 
         // Validate that we received an access token
         if (!tokenData.access_token) {
-            console.error('No access token in response')
+            logError('No access token in response')
             return {
                 statusCode: 401,
                 headers: getSecureCorsHeaders(origin),
@@ -139,7 +140,7 @@ export const handler = async (event) => {
             scope: currentScope
         }
 
-        console.log('Successfully obtained and cached new access token')
+        logDebug('Successfully obtained and cached new access token')
 
         // Return the access token
         return {
@@ -154,7 +155,7 @@ export const handler = async (event) => {
         }
 
     } catch (error) {
-        console.error('Auth function error:', error)
+        logError('Auth function error:', error)
         
         // 🔒 SECURITY: Handle timeout errors explicitly
         if (error.isTimeout) {

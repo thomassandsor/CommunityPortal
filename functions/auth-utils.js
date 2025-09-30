@@ -1,3 +1,5 @@
+import { logDebug, logError, logWarn } from './logger.js'
+
 // 🔒 RATE LIMITING: In-memory storage (use Redis/database in production for multi-instance)
 const rateLimitStore = new Map()
 
@@ -122,7 +124,7 @@ export function checkRateLimit(identifier, options = {}) {
         const oldestRequest = Math.min(...limitData.requests)
         const retryAfter = Math.ceil((oldestRequest + windowMs - now) / 1000)
         
-        console.warn(`🚨 RATE LIMIT: ${identifier} exceeded limit (${limitData.requests.length}/${maxRequests})`)
+        logWarn(`🚨 RATE LIMIT: ${identifier} exceeded limit (${limitData.requests.length}/${maxRequests})`)
         
         return {
             allowed: false,
@@ -145,7 +147,7 @@ export function checkRateLimit(identifier, options = {}) {
     const remaining = maxRequests - limitData.requests.length
     const resetTime = limitData.requests[0] + windowMs
     
-    console.log(`✅ RATE LIMIT: ${identifier} allowed (${limitData.requests.length}/${maxRequests})`)
+    logDebug(`✅ RATE LIMIT: ${identifier} allowed (${limitData.requests.length}/${maxRequests})`)
     
     return {
         allowed: true,
@@ -178,7 +180,7 @@ export function cleanupRateLimitStore(maxAge = 60 * 60 * 1000) {
     }
     
     if (removed > 0) {
-        console.log(`🧹 RATE LIMIT CLEANUP: Removed ${removed} old entries, ${rateLimitStore.size} remaining`)
+        logDebug(`🧹 RATE LIMIT CLEANUP: Removed ${removed} old entries, ${rateLimitStore.size} remaining`)
     }
     
     return removed
@@ -212,7 +214,7 @@ export function checkEmailVerificationAttempts(email) {
     // Check if currently locked out
     if (attemptData.lockedUntil && now < attemptData.lockedUntil) {
         const remainingSeconds = Math.ceil((attemptData.lockedUntil - now) / 1000)
-        console.warn(`🚨 EMAIL VERIFICATION LOCKED: ${email} is locked out for ${remainingSeconds}s more`)
+        logWarn(`🚨 EMAIL VERIFICATION LOCKED: ${email} is locked out for ${remainingSeconds}s more`)
         
         return {
             allowed: false,
@@ -239,7 +241,7 @@ export function checkEmailVerificationAttempts(email) {
         emailVerificationAttempts.set(key, attemptData)
         
         const lockoutMinutes = Math.ceil(lockoutDuration / 1000 / 60)
-        console.warn(`🚨 EMAIL VERIFICATION LIMIT: ${email} locked out after ${attemptData.attempts} attempts for ${lockoutMinutes} minutes`)
+        logWarn(`🚨 EMAIL VERIFICATION LIMIT: ${email} locked out after ${attemptData.attempts} attempts for ${lockoutMinutes} minutes`)
         
         return {
             allowed: false,
@@ -254,7 +256,7 @@ export function checkEmailVerificationAttempts(email) {
     emailVerificationAttempts.set(key, attemptData)
     
     const remaining = maxAttempts - attemptData.attempts
-    console.log(`✅ EMAIL VERIFICATION: ${email} attempt ${attemptData.attempts}/${maxAttempts} (${remaining} remaining)`)
+    logDebug(`✅ EMAIL VERIFICATION: ${email} attempt ${attemptData.attempts}/${maxAttempts} (${remaining} remaining)`)
     
     return {
         allowed: true,
@@ -276,7 +278,7 @@ export function clearEmailVerificationAttempts(email) {
     
     if (hadAttempts) {
         emailVerificationAttempts.delete(key)
-        console.log(`✅ EMAIL VERIFICATION CLEARED: Reset attempts for ${email}`)
+        logDebug(`✅ EMAIL VERIFICATION CLEARED: Reset attempts for ${email}`)
     }
 }
 
@@ -303,7 +305,7 @@ export function cleanupEmailVerificationStore(maxAge = 60 * 60 * 1000) {
     }
     
     if (removed > 0) {
-        console.log(`🧹 EMAIL VERIFICATION CLEANUP: Removed ${removed} old entries, ${emailVerificationAttempts.size} remaining`)
+        logDebug(`🧹 EMAIL VERIFICATION CLEANUP: Removed ${removed} old entries, ${emailVerificationAttempts.size} remaining`)
     }
     
     return removed
@@ -346,9 +348,9 @@ export function sanitizeError(error, context = 'unknown') {
     const errorStack = error instanceof Error ? error.stack : null
     
     // Log full error details server-side (will appear in Netlify logs)
-    console.error(`❌ ERROR [${context}]:`, errorMessage)
+    logError(`❌ ERROR [${context}]:`, errorMessage)
     if (errorStack) {
-        console.error('Stack trace:', errorStack)
+        logError('Stack trace:', errorStack)
     }
     
     // Determine error type based on message content
@@ -526,7 +528,7 @@ export async function validateUser(event) {
                         event.headers['x-real-ip'] || 
                         'unknown'
         
-        console.log('🔍 Request from IP:', clientIP)
+        logDebug('🔍 Request from IP:', clientIP)
         
         // Get authorization header
         const authHeader = event.headers.authorization || event.headers.Authorization
@@ -547,7 +549,7 @@ export async function validateUser(event) {
             throw new Error('Token length suspicious')
         }
 
-        console.log('✅ Token received, length:', token.length)
+        logDebug('✅ Token received, length:', token.length)
 
         // For development, we'll use a more permissive approach
         const parts = token.split('.')
@@ -560,8 +562,8 @@ export async function validateUser(event) {
             // Try to decode the JWT payload
             const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'))
             
-            console.log('✅ Token payload decoded successfully')
-            console.log('Available claims:', Object.keys(payload))
+            logDebug('✅ Token payload decoded successfully')
+            logDebug('Available claims:', Object.keys(payload))
             
             // Enhanced Clerk token validation
             if (!payload.sub || 
@@ -583,7 +585,7 @@ export async function validateUser(event) {
                 throw new Error('Token not yet valid')
             }
 
-            console.log('✅ Token validation successful for user:', payload.sub)
+            logDebug('✅ Token validation successful for user:', payload.sub)
 
             // Handle email extraction based on HTTP method
             let validatedEmail
@@ -623,11 +625,11 @@ export async function validateUser(event) {
                 clientIP: clientIP
             }
         } catch (decodeError) {
-            console.error('❌ Token decode error:', decodeError.message)
+            logError('❌ Token decode error:', decodeError.message)
             throw new Error(`Failed to decode token payload: ${decodeError.message}`)
         }
     } catch (error) {
-        console.error('❌ Authentication validation failed:', error.message)
+        logError('❌ Authentication validation failed:', error.message)
         throw new Error(`Authentication failed: ${error.message}`)
     }
 }
@@ -638,7 +640,7 @@ export async function validateUser(event) {
  */
 export async function validateSimpleAuth(event) {
     try {
-        console.log('🔍 Request from IP:', event.headers['x-forwarded-for'] || event.headers['x-real-ip'] || 'unknown')
+        logDebug('🔍 Request from IP:', event.headers['x-forwarded-for'] || event.headers['x-real-ip'] || 'unknown')
 
         // Extract Authorization header
         const authHeader = event.headers.authorization
@@ -647,19 +649,19 @@ export async function validateSimpleAuth(event) {
         }
 
         const token = authHeader.substring(7) // Remove 'Bearer ' prefix
-        console.log('✅ Token received, length:', token.length)
+        logDebug('✅ Token received, length:', token.length)
 
         try {
             // Decode JWT payload without verification (Clerk handles verification)
             const payload = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString())
-            console.log('✅ Token payload decoded successfully')
-            console.log('Available claims:', Object.keys(payload))
+            logDebug('✅ Token payload decoded successfully')
+            logDebug('Available claims:', Object.keys(payload))
 
             if (!payload.sub) {
                 throw new Error('Token missing required user ID claim')
             }
 
-            console.log('✅ Token validation successful for user:', payload.sub)
+            logDebug('✅ Token validation successful for user:', payload.sub)
 
             return {
                 userId: payload.sub,
@@ -669,11 +671,11 @@ export async function validateSimpleAuth(event) {
                 clientIP: event.headers['x-forwarded-for'] || event.headers['x-real-ip'] || 'unknown'
             }
         } catch (decodeError) {
-            console.error('❌ Token decode error:', decodeError.message)
+            logError('❌ Token decode error:', decodeError.message)
             throw new Error(`Failed to decode token payload: ${decodeError.message}`)
         }
     } catch (error) {
-        console.error('❌ Authentication validation failed:', error.message)
+        logError('❌ Authentication validation failed:', error.message)
         throw new Error(`Authentication failed: ${error.message}`)
     }
 }
@@ -924,7 +926,7 @@ export async function validateContactOwnership(contactGuid, user, accessToken, u
     // Validate and sanitize the GUID first
     const sanitizedGuid = sanitizeGuid(contactGuid, 'Contact GUID')
     
-    console.log(`🔒 OWNERSHIP VALIDATION: Checking contact ${sanitizedGuid} for user ${user.userId}`)
+    logDebug(`🔒 OWNERSHIP VALIDATION: Checking contact ${sanitizedGuid} for user ${user.userId}`)
     
     // Fetch the contact record from Dataverse
     const contactUrl = `${DATAVERSE_URL}/api/data/v9.0/contacts(${sanitizedGuid})?$select=contactid,emailaddress1,cp_portaladmin,_parentcustomerid_value`
@@ -941,10 +943,10 @@ export async function validateContactOwnership(contactGuid, user, accessToken, u
     
     if (!response.ok) {
         if (response.status === 404) {
-            console.error(`🛡️ OWNERSHIP VIOLATION: Contact GUID ${sanitizedGuid} does not exist`)
+            logError(`🛡️ OWNERSHIP VIOLATION: Contact GUID ${sanitizedGuid} does not exist`)
             throw new Error('Contact record not found')
         }
-        console.error(`🛡️ OWNERSHIP VALIDATION ERROR: Failed to fetch contact: ${response.status}`)
+        logError(`🛡️ OWNERSHIP VALIDATION ERROR: Failed to fetch contact: ${response.status}`)
         throw new Error('Failed to validate contact ownership')
     }
     
@@ -959,21 +961,21 @@ export async function validateContactOwnership(contactGuid, user, accessToken, u
         const normalizedUserEmail = userEmail.toLowerCase()
         
         if (!contactEmail) {
-            console.error(`🛡️ OWNERSHIP VIOLATION: Contact ${sanitizedGuid} has no email address`)
+            logError(`🛡️ OWNERSHIP VIOLATION: Contact ${sanitizedGuid} has no email address`)
             throw new Error('Contact record has no email address')
         }
         
         if (contactEmail !== normalizedUserEmail) {
-            console.error(`🛡️ OWNERSHIP VIOLATION: Contact ${sanitizedGuid} email "${contactEmail}" does not match user email "${normalizedUserEmail}"`)
+            logError(`🛡️ OWNERSHIP VIOLATION: Contact ${sanitizedGuid} email "${contactEmail}" does not match user email "${normalizedUserEmail}"`)
             throw new Error('Access denied: Contact does not belong to authenticated user')
         }
         
-        console.log(`✅ OWNERSHIP VALIDATED: Contact ${sanitizedGuid} belongs to ${normalizedUserEmail}`)
+        logDebug(`✅ OWNERSHIP VALIDATED: Contact ${sanitizedGuid} belongs to ${normalizedUserEmail}`)
     } else {
         // Email not available in JWT - contact exists and GUID is valid
         // This is acceptable since the frontend already performed contact lookup via ContactChecker
         // and the user authenticated with Clerk
-        console.log(`✅ OWNERSHIP CHECK: Contact ${sanitizedGuid} exists and GUID is valid (email verification not available in JWT)`)
+        logDebug(`✅ OWNERSHIP CHECK: Contact ${sanitizedGuid} exists and GUID is valid (email verification not available in JWT)`)
     }
     
     return contact

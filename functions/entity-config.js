@@ -15,6 +15,7 @@
  */
 
 import { validateSimpleAuth, createAuthErrorResponse, createSuccessResponse, getSecureCorsHeaders, checkRateLimit, createRateLimitResponse, createSafeErrorResponse } from './auth-utils.js'
+import { logDebug, logError, logWarn } from './logger.js'
 
 // Configuration cache (in production, use Redis or similar)
 const configCache = new Map()
@@ -41,7 +42,7 @@ export const handler = async (event) => {
     try {
         // Authenticate user (simple auth - no email required)
         const user = await validateSimpleAuth(event)
-        console.log(`✅ Entity config request from user: ${user.userId}`)
+        logDebug(`✅ Entity config request from user: ${user.userId}`)
         
         // 🔒 SECURITY: Rate limiting per user ID
         const rateLimitResult = checkRateLimit(user.userId, {
@@ -70,7 +71,7 @@ export const handler = async (event) => {
         // Check if cache clear is requested
         const clearCache = event.queryStringParameters?.clearCache === 'true'
         if (clearCache) {
-            console.log('🧹 Clearing entity config cache...')
+            logDebug('🧹 Clearing entity config cache...')
             configCache.clear()
         }
 
@@ -110,14 +111,14 @@ async function getAllEntityConfigs(accessToken, isAdmin) {
     // Check cache first
     const cached = configCache.get(cacheKey)
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-        console.log('📋 Returning cached entity configurations')
+        logDebug('📋 Returning cached entity configurations')
         return cached.data
     }
     
-    console.log('🔄 Cache miss or expired - fetching fresh data')
+    logDebug('🔄 Cache miss or expired - fetching fresh data')
 
-    console.log('🔍 Fetching entity configurations from Dataverse...')
-    console.log('🔍 User isAdmin:', isAdmin)
+    logDebug('🔍 Fetching entity configurations from Dataverse...')
+    logDebug('🔍 User isAdmin:', isAdmin)
     
     const { DATAVERSE_URL } = process.env
     
@@ -131,7 +132,7 @@ async function getAllEntityConfigs(accessToken, isAdmin) {
     }
     // For admins, show all configurations where cp_showinmenu = true (regardless of cp_requiresadmin)
     
-    console.log('🔍 OData Filter:', filter)
+    logDebug('🔍 OData Filter:', filter)
     
     const select = [
         'cp_entityconfigid',
@@ -150,7 +151,7 @@ async function getAllEntityConfigs(accessToken, isAdmin) {
     ].join(',')
 
     const url = `${DATAVERSE_URL}/api/data/v9.0/cp_entityconfigs?$filter=${encodeURIComponent(filter)}&$select=${select}&$orderby=cp_menuorder`
-    console.log('🔍 Full OData URL:', url)
+    logDebug('🔍 Full OData URL:', url)
 
     const response = await fetch(url, {
         method: 'GET',
@@ -164,12 +165,12 @@ async function getAllEntityConfigs(accessToken, isAdmin) {
 
     if (!response.ok) {
         const errorText = await response.text()
-        console.error('Failed to fetch entity configurations:', response.status, errorText)
+        logError('Failed to fetch entity configurations:', response.status, errorText)
         throw new Error(`Failed to fetch entity configurations: ${response.status}`)
     }
 
     const data = await response.json()
-    console.log(`✅ Found ${data.value.length} entity configurations matching filter`)
+    logDebug(`✅ Found ${data.value.length} entity configurations matching filter`)
     
     const configs = data.value.map(normalizeEntityConfig)
 
@@ -179,7 +180,7 @@ async function getAllEntityConfigs(accessToken, isAdmin) {
         timestamp: Date.now()
     })
 
-    console.log(`✅ Retrieved ${configs.length} entity configurations`)
+    logDebug(`✅ Retrieved ${configs.length} entity configurations`)
     return configs
 }
 
@@ -192,11 +193,11 @@ async function getEntityConfig(accessToken, entityName, isAdmin) {
     // Check cache first
     const cached = configCache.get(cacheKey)
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-        console.log(`📋 Returning cached config for: ${entityName}`)
+        logDebug(`📋 Returning cached config for: ${entityName}`)
         return cached.data
     }
 
-    console.log(`🔍 Fetching configuration for entity: ${entityName}`)
+    logDebug(`🔍 Fetching configuration for entity: ${entityName}`)
     
     const { DATAVERSE_URL } = process.env
     
@@ -238,15 +239,15 @@ async function getEntityConfig(accessToken, entityName, isAdmin) {
 
     if (!response.ok) {
         const errorText = await response.text()
-        console.error('Failed to fetch entity configuration:', response.status, errorText)
+        logError('Failed to fetch entity configuration:', response.status, errorText)
         throw new Error(`Failed to fetch entity configuration: ${response.status}`)
     }
 
     const data = await response.json()
-    console.log(`🔍 RAW ENTITY CONFIG from Dataverse for ${entityName}:`, data.value[0])
+    logDebug(`🔍 RAW ENTITY CONFIG from Dataverse for ${entityName}:`, data.value[0])
     
     const config = data.value && data.value.length > 0 ? normalizeEntityConfig(data.value[0]) : null
-    console.log(`🔍 NORMALIZED ENTITY CONFIG:`, config)
+    logDebug(`🔍 NORMALIZED ENTITY CONFIG:`, config)
 
     if (config) {
         // Cache the result
@@ -254,9 +255,9 @@ async function getEntityConfig(accessToken, entityName, isAdmin) {
             data: config,
             timestamp: Date.now()
         })
-        console.log(`✅ Found configuration for: ${entityName}`)
+        logDebug(`✅ Found configuration for: ${entityName}`)
     } else {
-        console.log(`❌ No configuration found for: ${entityName}`)
+        logDebug(`❌ No configuration found for: ${entityName}`)
     }
 
     return config
@@ -314,14 +315,14 @@ async function getUserContact(accessToken, userEmail) {
         })
 
         if (!response.ok) {
-            console.warn('Failed to fetch user contact for admin check')
+            logWarn('Failed to fetch user contact for admin check')
             return null
         }
 
         const data = await response.json()
         return data.value && data.value.length > 0 ? data.value[0] : null
     } catch (error) {
-        console.warn('Error fetching user contact:', error)
+        logWarn('Error fetching user contact:', error)
         return null
     }
 }
@@ -345,7 +346,7 @@ async function getAccessToken() {
         }
         return null
     } catch (error) {
-        console.error('Error getting access token:', error)
+        logError('Error getting access token:', error)
         return null
     }
 }
