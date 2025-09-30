@@ -2000,47 +2000,70 @@ async function getAccessToken() {
  */
 async function resolveEntityName(urlPathOrName, accessToken) {
     try {
-        // Import entity-config function
-        const { handler: entityConfigHandler } = await import('./entity-config.js')
+        const { DATAVERSE_URL } = process.env
         
-        // Create fake auth headers for the call (we already have valid access token)
-        const configEvent = {
-            httpMethod: 'GET',
-            queryStringParameters: null,
-            headers: { authorization: `Bearer ${accessToken}` }
-        }
+        // Directly query Dataverse for entity configurations (bypass handler auth requirements)
+        const filter = 'statecode eq 0'  // Only active configurations
+        const select = 'cp_entityconfigid,cp_name,cp_entitylogicalname'
+        const url = `${DATAVERSE_URL}/api/data/v9.0/cp_entityconfigs?$filter=${encodeURIComponent(filter)}&$select=${select}`
         
-        const configResult = await entityConfigHandler(configEvent, {})
+        console.log('🔍 RESOLVE ENTITY NAME: Querying Dataverse for configs...')
         
-        if (configResult.statusCode !== 200) {
-            console.warn('Failed to fetch entity configurations for resolution')
+        const response = await fetch(url, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'OData-MaxVersion': '4.0',
+                'OData-Version': '4.0',
+                'Accept': 'application/json',
+            },
+        })
+        
+        if (!response.ok) {
+            console.warn('Failed to fetch entity configurations for resolution:', response.status)
             return null
         }
         
-        const configData = JSON.parse(configResult.body)
-        const configs = configData.configs || []
+        const data = await response.json()
+        const configs = data.value || []
+        
+        console.log(`🔍 RESOLVE ENTITY NAME: Found ${configs.length} configurations`)
+        console.log(`🔍 RESOLVE ENTITY NAME: Looking for: "${urlPathOrName}"`)
         
         // First try direct match with logical name (backward compatibility)
-        let matchedConfig = configs.find(config => config.entityLogicalName === urlPathOrName)
+        let matchedConfig = configs.find(config => config.cp_entitylogicalname === urlPathOrName)
+        
+        if (matchedConfig) {
+            console.log(`✅ RESOLVE ENTITY NAME: Matched by logical name: ${matchedConfig.cp_entitylogicalname}`)
+            return matchedConfig.cp_entitylogicalname
+        }
         
         // If no direct match, try cp_name match
-        if (!matchedConfig) {
-            matchedConfig = configs.find(config => config.name === urlPathOrName)
+        matchedConfig = configs.find(config => config.cp_name === urlPathOrName)
+        
+        if (matchedConfig) {
+            console.log(`✅ RESOLVE ENTITY NAME: Matched by display name: ${matchedConfig.cp_name} -> ${matchedConfig.cp_entitylogicalname}`)
+            return matchedConfig.cp_entitylogicalname
         }
         
         // If still no match, try flexible plural/singular matching
-        if (!matchedConfig) {
-            const urlLower = urlPathOrName.toLowerCase()
-            matchedConfig = configs.find(config => {
-                const nameLower = config.name.toLowerCase()
-                // Try adding/removing 's' for basic plural/singular matching
-                return nameLower === urlLower + 's' || 
-                       nameLower === urlLower.replace(/s$/, '') ||
-                       nameLower + 's' === urlLower
-            })
+        const urlLower = urlPathOrName.toLowerCase()
+        matchedConfig = configs.find(config => {
+            const nameLower = (config.cp_name || '').toLowerCase()
+            // Try adding/removing 's' for basic plural/singular matching
+            return nameLower === urlLower + 's' || 
+                   nameLower === urlLower.replace(/s$/, '') ||
+                   nameLower + 's' === urlLower
+        })
+        
+        if (matchedConfig) {
+            console.log(`✅ RESOLVE ENTITY NAME: Matched by plural/singular: ${matchedConfig.cp_name} -> ${matchedConfig.cp_entitylogicalname}`)
+            return matchedConfig.cp_entitylogicalname
         }
         
-        return matchedConfig ? matchedConfig.entityLogicalName : null
+        console.warn(`❌ RESOLVE ENTITY NAME: No match found for "${urlPathOrName}"`)
+        console.warn(`❌ Available configs:`, configs.map(c => `${c.cp_name} (${c.cp_entitylogicalname})`).join(', '))
+        return null
         
     } catch (error) {
         console.error('Error resolving entity name:', error)
