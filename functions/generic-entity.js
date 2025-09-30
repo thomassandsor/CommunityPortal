@@ -2000,12 +2000,10 @@ async function getAccessToken() {
  */
 async function resolveEntityName(urlPathOrName, accessToken) {
     try {
-        const { DATAVERSE_URL } = process.env
-        
         // Directly query Dataverse for entity configurations (bypass handler auth requirements)
         const filter = 'statecode eq 0'  // Only active configurations
         const select = 'cp_entityconfigid,cp_name,cp_entitylogicalname'
-        const url = `${DATAVERSE_URL}/api/data/v9.0/cp_entityconfigs?$filter=${encodeURIComponent(filter)}&$select=${select}`
+        const url = `${process.env.DATAVERSE_URL}/api/data/v9.0/cp_entityconfigs?$filter=${encodeURIComponent(filter)}&$select=${select}`
         
         console.log('🔍 RESOLVE ENTITY NAME: Querying Dataverse for configs...')
         
