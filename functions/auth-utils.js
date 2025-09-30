@@ -1,3 +1,131 @@
+// 🔒 RATE LIMITING: In-memory storage (use Redis/database in production for multi-instance)
+const rateLimitStore = new Map()
+
+/**
+ * 🔒 SECURITY: Rate limiting middleware to prevent abuse and DoS attacks
+ * Tracks requests per identifier (IP or user ID) with automatic cleanup
+ * 
+ * @param {string} identifier - Unique identifier (IP address, user ID, or email)
+ * @param {Object} options - Rate limit configuration
+ * @param {number} options.maxRequests - Maximum requests allowed in time window
+ * @param {number} options.windowMs - Time window in milliseconds
+ * @param {string} [options.message] - Custom error message
+ * @returns {Object} - Rate limit result with allowed status and headers
+ */
+export function checkRateLimit(identifier, options = {}) {
+    const {
+        maxRequests = 60,
+        windowMs = 60 * 1000, // 1 minute default
+        message = 'Rate limit exceeded. Please try again later.'
+    } = options
+    
+    const now = Date.now()
+    const key = `ratelimit_${identifier}`
+    
+    // Get or create rate limit entry
+    let limitData = rateLimitStore.get(key)
+    
+    if (!limitData) {
+        // First request from this identifier
+        limitData = {
+            requests: [],
+            firstRequest: now
+        }
+        rateLimitStore.set(key, limitData)
+    }
+    
+    // Remove requests outside the time window
+    limitData.requests = limitData.requests.filter(timestamp => now - timestamp < windowMs)
+    
+    // Check if rate limit exceeded
+    if (limitData.requests.length >= maxRequests) {
+        const oldestRequest = Math.min(...limitData.requests)
+        const retryAfter = Math.ceil((oldestRequest + windowMs - now) / 1000)
+        
+        console.warn(`🚨 RATE LIMIT: ${identifier} exceeded limit (${limitData.requests.length}/${maxRequests})`)
+        
+        return {
+            allowed: false,
+            remaining: 0,
+            retryAfter: retryAfter,
+            message: message,
+            headers: {
+                'X-RateLimit-Limit': maxRequests.toString(),
+                'X-RateLimit-Remaining': '0',
+                'X-RateLimit-Reset': new Date(oldestRequest + windowMs).toISOString(),
+                'Retry-After': retryAfter.toString()
+            }
+        }
+    }
+    
+    // Add current request timestamp
+    limitData.requests.push(now)
+    rateLimitStore.set(key, limitData)
+    
+    const remaining = maxRequests - limitData.requests.length
+    const resetTime = limitData.requests[0] + windowMs
+    
+    console.log(`✅ RATE LIMIT: ${identifier} allowed (${limitData.requests.length}/${maxRequests})`)
+    
+    return {
+        allowed: true,
+        remaining: remaining,
+        headers: {
+            'X-RateLimit-Limit': maxRequests.toString(),
+            'X-RateLimit-Remaining': remaining.toString(),
+            'X-RateLimit-Reset': new Date(resetTime).toISOString()
+        }
+    }
+}
+
+/**
+ * 🔒 SECURITY: Cleanup old rate limit entries to prevent memory leaks
+ * Should be called periodically (e.g., every 5 minutes)
+ * 
+ * @param {number} maxAge - Maximum age of entries in milliseconds (default: 1 hour)
+ * @returns {number} - Number of entries removed
+ */
+export function cleanupRateLimitStore(maxAge = 60 * 60 * 1000) {
+    const now = Date.now()
+    let removed = 0
+    
+    for (const [key, data] of rateLimitStore.entries()) {
+        // Remove entries with no recent requests
+        if (data.requests.length === 0 || (now - data.firstRequest) > maxAge) {
+            rateLimitStore.delete(key)
+            removed++
+        }
+    }
+    
+    if (removed > 0) {
+        console.log(`🧹 RATE LIMIT CLEANUP: Removed ${removed} old entries, ${rateLimitStore.size} remaining`)
+    }
+    
+    return removed
+}
+
+/**
+ * 🔒 SECURITY: Create rate limit error response
+ * 
+ * @param {Object} rateLimitResult - Result from checkRateLimit()
+ * @param {string} origin - Request origin for CORS headers
+ * @returns {Object} - Netlify function response object
+ */
+export function createRateLimitResponse(rateLimitResult, origin = null) {
+    return {
+        statusCode: 429,
+        headers: {
+            ...getSecureCorsHeaders(origin),
+            ...rateLimitResult.headers
+        },
+        body: JSON.stringify({
+            error: rateLimitResult.message,
+            retryAfter: rateLimitResult.retryAfter,
+            timestamp: new Date().toISOString()
+        })
+    }
+}
+
 /**
  * Validate user authentication and extract user info from Clerk JWT token
  * @param {Object} event - Netlify function event object

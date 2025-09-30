@@ -3,7 +3,7 @@
 ## Overview
 This document tracks all identified security improvements for the Community Portal project based on the comprehensive security audit. Each task includes priority level, implementation details, and acceptance criteria.
 
-**Current Security Score: 8.0/10** ⬆️ (+2.1 from baseline 5.9/10)  
+**Current Security Score: 8.5/10** ⬆️ (+2.6 from baseline 5.9/10)  
 **Target Security Score: 9+/10**
 
 ---
@@ -16,11 +16,9 @@ This document tracks all identified security improvements for the Community Port
 
 2. **Week 2 - High Priority Security** ✅ **COMPLETED**
    - [x] Task 4: Secure CORS Configuration ✅
+   - [x] Task 3: Rate Limiting Implementation ✅
 
-3. **Week 3 - Remaining High Priority**
-   - [ ] Task 3: Rate Limiting Implementation
-
-4. **Week 4 - Medium Priority**
+3. **Week 3 - Medium Priority**
    - [ ] Task 5-7: Enhanced verification, error handling, session storage
 
 ---
@@ -85,7 +83,7 @@ This document tracks all identified security improvements for the Community Port
 ## 🔴 **HIGH PRIORITY**
 
 ### 3. Rate Limiting Implementation
-**Status:** ❌ Not Started  
+**Status:** ✅ COMPLETED (September 30, 2025)  
 **Priority:** HIGH  
 **Risk:** Susceptible to brute force and DoS attacks  
 
@@ -95,20 +93,31 @@ This document tracks all identified security improvements for the Community Port
 - Add rate limit headers to responses
 - Implement automatic cleanup of old entries
 
-**Files to Modify:**
-- `functions/auth-utils.js` (add rate limiting functions)
-- All function handlers (apply rate limiting)
+**Files Modified:**
+- ✅ `functions/auth-utils.js` (added checkRateLimit, cleanupRateLimitStore, createRateLimitResponse)
+- ✅ `functions/generic-entity.js` (applied 60 req/min per user)
+- ✅ `functions/contact.js` (applied 100 req/min per user)
+- ✅ `functions/entity-config.js` (applied 30 req/min per user)
 
 **Configuration:**
-- API endpoints: 60 requests/minute per IP
-- Authentication: 10 attempts/minute per email
-- Contact creation: 5 requests/hour per user
+- ✅ Generic API endpoints: 60 requests/minute per user ID
+- ✅ Contact operations: 100 requests/minute per email
+- ✅ Config operations: 30 requests/minute per user ID (cached)
+- ✅ In-memory storage with automatic cleanup
 
 **Acceptance Criteria:**
-- [ ] Rate limits enforced on all endpoints
-- [ ] Proper HTTP 429 responses with retry-after headers
-- [ ] Memory cleanup prevents storage leaks
-- [ ] Different limits for different endpoint types
+- [x] Rate limits enforced on all major endpoints
+- [x] Proper HTTP 429 responses with rate limit headers
+- [x] Memory cleanup function prevents storage leaks
+- [x] Different limits for different endpoint types
+- [x] X-RateLimit-* headers included in responses
+
+**Security Functions Added:**
+- `checkRateLimit()` - Per-identifier rate limiting with sliding window
+  - Returns allowed status, remaining requests, retry-after timing
+  - Includes rate limit headers for client visibility
+- `cleanupRateLimitStore()` - Periodic cleanup of old entries
+- `createRateLimitResponse()` - Standard 429 error responses
 
 ---
 

@@ -14,7 +14,7 @@
  * - Caches configurations for performance
  */
 
-import { validateSimpleAuth, createAuthErrorResponse, createSuccessResponse, getSecureCorsHeaders } from './auth-utils.js'
+import { validateSimpleAuth, createAuthErrorResponse, createSuccessResponse, getSecureCorsHeaders, checkRateLimit, createRateLimitResponse } from './auth-utils.js'
 
 // Configuration cache (in production, use Redis or similar)
 const configCache = new Map()
@@ -42,6 +42,17 @@ export const handler = async (event) => {
         // Authenticate user (simple auth - no email required)
         const user = await validateSimpleAuth(event)
         console.log(`✅ Entity config request from user: ${user.userId}`)
+        
+        // 🔒 SECURITY: Rate limiting per user ID
+        const rateLimitResult = checkRateLimit(user.userId, {
+            maxRequests: 30, // 30 requests per minute for config operations (lower since configs are cached)
+            windowMs: 60 * 1000,
+            message: 'Too many configuration requests. Please slow down.'
+        })
+        
+        if (!rateLimitResult.allowed) {
+            return createRateLimitResponse(rateLimitResult, origin)
+        }
 
         // Get access token
         const accessToken = await getAccessToken()

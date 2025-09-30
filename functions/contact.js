@@ -17,10 +17,7 @@
  * - Request size limits
  */
 
-import { validateUser, createAuthErrorResponse, createSuccessResponse, sanitizeEmail, buildSecureEmailFilter, getSecureCorsHeaders } from './auth-utils.js'
-
-// Rate limiting storage (in production, use Redis or similar)
-const rateLimits = new Map()
+import { validateUser, createAuthErrorResponse, createSuccessResponse, sanitizeEmail, buildSecureEmailFilter, getSecureCorsHeaders, checkRateLimit, createRateLimitResponse } from './auth-utils.js'
 
 // Security helper functions
 function validateEmail(email) {
@@ -63,35 +60,6 @@ function validateContactData(data, authenticatedEmail) {
     return errors
 }
 
-function checkRateLimit(userEmail) {
-    const now = Date.now()
-    const windowMs = 60 * 1000 // 1 minute
-    const maxRequests = 100 // Increased to 100 requests per minute per user (reasonable for normal usage)
-
-    const userRequests = rateLimits.get(userEmail) || []
-    const recentRequests = userRequests.filter(time => now - time < windowMs)
-
-    if (recentRequests.length >= maxRequests) {
-        throw new Error('Rate limit exceeded. Please try again later.')
-    }
-
-    // Clean up old entries
-    rateLimits.set(userEmail, [...recentRequests, now])
-
-    // Cleanup old entries periodically
-    if (rateLimits.size > 1000) {
-        const cutoff = now - windowMs
-        for (const [email, requests] of rateLimits.entries()) {
-            const validRequests = requests.filter(time => time > cutoff)
-            if (validRequests.length === 0) {
-                rateLimits.delete(email)
-            } else {
-                rateLimits.set(email, validRequests)
-            }
-        }
-    }
-}
-
 export const handler = async (event) => {
     // Get origin for CORS
     const origin = event.headers?.origin || event.headers?.Origin || null
@@ -122,18 +90,15 @@ export const handler = async (event) => {
             return createAuthErrorResponse('Request payload too large', 413, origin)
         }
 
-        // Security: Rate limiting per authenticated user
-        try {
-            checkRateLimit(userEmail)
-        } catch (rateLimitError) {
-            return {
-                statusCode: 429,
-                headers: {
-                    ...getSecureCorsHeaders(origin),
-                    'Retry-After': '60',
-                },
-                body: JSON.stringify({ error: rateLimitError.message }),
-            }
+        // 🔒 SECURITY: Rate limiting per authenticated user
+        const rateLimitResult = checkRateLimit(userEmail, {
+            maxRequests: 100, // 100 requests per minute for contact operations
+            windowMs: 60 * 1000,
+            message: 'Too many contact requests. Please try again later.'
+        })
+        
+        if (!rateLimitResult.allowed) {
+            return createRateLimitResponse(rateLimitResult, origin)
         }
 
         // Get environment variables

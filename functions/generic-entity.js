@@ -18,7 +18,7 @@
  * - Admin permission checks
  */
 
-import { validateSimpleAuth, createAuthErrorResponse, createSuccessResponse, buildSecureEmailFilter, sanitizeGuid, isValidGuid, validateContactOwnership, getSecureCorsHeaders } from './auth-utils.js'
+import { validateSimpleAuth, createAuthErrorResponse, createSuccessResponse, buildSecureEmailFilter, sanitizeGuid, isValidGuid, validateContactOwnership, getSecureCorsHeaders, checkRateLimit, createRateLimitResponse } from './auth-utils.js'
 
 export const handler = async (event) => {
     // Get origin for CORS
@@ -33,7 +33,7 @@ export const handler = async (event) => {
         }
     }
 
-    console.log(`🚀 GENERIC-ENTITY FUNCTION CALLED v2`) // Fixed duplicate imports
+    console.log(`🚀 GENERIC-ENTITY FUNCTION CALLED v2`)
     console.log(`🚀 Method: ${event.httpMethod}`)
     console.log(`🚀 Path: ${event.path}`)
     console.log(`🚀 Query: ${JSON.stringify(event.queryStringParameters)}`)
@@ -50,6 +50,17 @@ export const handler = async (event) => {
         // Authenticate user (simple auth - no email required)
         const user = await validateSimpleAuth(event)
         console.log(`✅ Generic entity request from: ${user.userId}`)
+        
+        // 🔒 SECURITY: Rate limiting per user ID
+        const rateLimitResult = checkRateLimit(user.userId, {
+            maxRequests: 60, // 60 requests per minute for generic entity operations
+            windowMs: 60 * 1000,
+            message: 'Too many API requests. Please slow down.'
+        })
+        
+        if (!rateLimitResult.allowed) {
+            return createRateLimitResponse(rateLimitResult, origin)
+        }
 
         // Get entity name from query parameters
         const entitySlugOrName = event.queryStringParameters?.entity
