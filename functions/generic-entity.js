@@ -157,13 +157,13 @@ export const handler = async (event) => {
         switch (event.httpMethod) {
             case 'GET':
                 if (mode === 'list') {
-                    return await handleListRequest(accessToken, entityConfig, userContact, viewMode, origin)
+                    return await handleListRequest(accessToken, entityConfig, userContact, viewMode, origin, event)
                 } else if (mode === 'form') {
                     return await handleFormMetadataRequest(accessToken, entityConfig, userContact, origin)
                 } else if (entityId) {
                     return await handleSingleEntityRequest(accessToken, entityConfig, userContact, entityId, origin)
                 } else {
-                    return await handleListRequest(accessToken, entityConfig, userContact, viewMode, origin)
+                    return await handleListRequest(accessToken, entityConfig, userContact, viewMode, origin, event)
                 }
 
             case 'POST':
@@ -233,8 +233,41 @@ async function getEntityMetadata(accessToken, entityLogicalName) {
 /**
  * Handle list request - get entities with view metadata
  */
-async function handleListRequest(accessToken, entityConfig, userContact, viewMode = 'personal', origin = null) {
+async function handleListRequest(accessToken, entityConfig, userContact, viewMode = 'personal', origin = null, event = null) {
     const { DATAVERSE_URL } = process.env
+    
+    // 🔒 SECURITY: Pagination limits to prevent DoS and memory exhaustion
+    const MAX_RECORDS = 100  // Hard limit - never exceed this
+    const DEFAULT_PAGE_SIZE = 20  // Default records per page
+    
+    // Get pagination parameters from query string
+    let requestedTop = DEFAULT_PAGE_SIZE
+    let skip = 0
+    
+    if (event && event.queryStringParameters) {
+        // Validate and sanitize $top parameter
+        if (event.queryStringParameters.$top || event.queryStringParameters.top) {
+            const topParam = event.queryStringParameters.$top || event.queryStringParameters.top
+            const parsedTop = parseInt(topParam, 10)
+            
+            if (!isNaN(parsedTop) && parsedTop > 0) {
+                // Enforce maximum limit
+                requestedTop = Math.min(parsedTop, MAX_RECORDS)
+                console.log(`📊 PAGINATION: Requested ${parsedTop}, enforcing ${requestedTop} (max ${MAX_RECORDS})`)
+            }
+        }
+        
+        // Validate and sanitize $skip parameter for pagination
+        if (event.queryStringParameters.$skip || event.queryStringParameters.skip) {
+            const skipParam = event.queryStringParameters.$skip || event.queryStringParameters.skip
+            const parsedSkip = parseInt(skipParam, 10)
+            
+            if (!isNaN(parsedSkip) && parsedSkip >= 0) {
+                skip = parsedSkip
+                console.log(`📊 PAGINATION: Skip ${skip} records`)
+            }
+        }
+    }
     
     // Get view metadata if available
     let viewMetadata = null
@@ -253,8 +286,13 @@ async function handleListRequest(accessToken, entityConfig, userContact, viewMod
     // Safety check: if select is empty, use default fields
     const finalSelect = select && select.trim() ? select : getDefaultEntityFields(entityConfig.entityLogicalName)
 
-    // Build the URL using unified pattern for all entities
-    let url = `${DATAVERSE_URL}/api/data/v9.0/${getEntitySetName(entityConfig.entityLogicalName)}?$filter=${encodeURIComponent(securityFilter)}&$orderby=createdon desc&$top=100`
+    // Build the URL using unified pattern for all entities with pagination
+    let url = `${DATAVERSE_URL}/api/data/v9.0/${getEntitySetName(entityConfig.entityLogicalName)}?$filter=${encodeURIComponent(securityFilter)}&$orderby=createdon desc&$top=${requestedTop}`
+    
+    // Add skip if pagination is used
+    if (skip > 0) {
+        url += `&$skip=${skip}`
+    }
     
     // Add select fields if available
     if (finalSelect) {
@@ -265,12 +303,16 @@ async function handleListRequest(accessToken, entityConfig, userContact, viewMod
     if (expand) {
         url += `&$expand=${expand}`
     }
+    
+    // Add count to support pagination metadata
+    url += `&$count=true`
 
     // DEBUG: Log the complete OData query
     console.log(`🔍 LIST REQUEST DEBUG:`)
     console.log(`🔍 Entity: ${entityConfig.entityLogicalName}`)
     console.log(`🔍 Entity Set: ${getEntitySetName(entityConfig.entityLogicalName)}`)
     console.log(`🔍 Security Filter: ${securityFilter}`)
+    console.log(`🔍 Pagination: top=${requestedTop}, skip=${skip}`)
     console.log(`🔍 Select: ${finalSelect}`)
     console.log(`🔍 Expand: ${expand}`)
     console.log(`🔍 Complete URL: ${url}`)
@@ -282,6 +324,7 @@ async function handleListRequest(accessToken, entityConfig, userContact, viewMod
             'OData-MaxVersion': '4.0',
             'OData-Version': '4.0',
             'Accept': 'application/json',
+            'Prefer': 'odata.include-annotations="*"'  // Include count
         },
     })
 
@@ -293,8 +336,10 @@ async function handleListRequest(accessToken, entityConfig, userContact, viewMod
 
     const data = await response.json()
     const entities = data.value || []
+    const totalCount = data['@odata.count'] !== undefined ? data['@odata.count'] : entities.length
+    const nextLink = data['@odata.nextLink']
 
-    console.log(`✅ Successfully retrieved ${entities.length} entities`)
+    console.log(`✅ Successfully retrieved ${entities.length} entities (total available: ${totalCount})`)
     console.log(`🔍 SAMPLE ENTITY DATA:`, entities[0])
     console.log(`🔍 ENTITY KEYS:`, entities.length > 0 ? Object.keys(entities[0]) : 'No entities')
     
@@ -310,7 +355,14 @@ async function handleListRequest(accessToken, entityConfig, userContact, viewMod
         entities: entities,
         entityConfig: entityConfig,
         viewMetadata: viewMetadata,
-        totalCount: entities.length,
+        pagination: {
+            pageSize: requestedTop,
+            skip: skip,
+            returned: entities.length,
+            totalCount: totalCount,
+            hasMore: !!nextLink,
+            nextLink: nextLink
+        },
         mode: 'list',
         userIsAdmin: !!userContact?.cp_portaladmin
     }, 200, origin)
