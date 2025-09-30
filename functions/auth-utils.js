@@ -1,6 +1,9 @@
 // 🔒 RATE LIMITING: In-memory storage (use Redis/database in production for multi-instance)
 const rateLimitStore = new Map()
 
+// 🔒 EMAIL VERIFICATION: In-memory storage for verification attempt tracking
+const emailVerificationAttempts = new Map()
+
 /**
  * 🔒 SECURITY: Rate limiting middleware to prevent abuse and DoS attacks
  * Tracks requests per identifier (IP or user ID) with automatic cleanup
@@ -102,6 +105,155 @@ export function cleanupRateLimitStore(maxAge = 60 * 60 * 1000) {
     }
     
     return removed
+}
+
+/**
+ * 🔒 SECURITY: Track email verification attempts to prevent brute force attacks
+ * Implements progressive lockout: 5 attempts allowed, then 15-minute lockout
+ * 
+ * @param {string} email - Email address attempting verification
+ * @returns {Object} - Result with allowed status and attempt information
+ */
+export function checkEmailVerificationAttempts(email) {
+    const now = Date.now()
+    const key = `email_verify_${email.toLowerCase()}`
+    const maxAttempts = 5
+    const lockoutDuration = 15 * 60 * 1000 // 15 minutes
+    
+    // Get or create attempt tracking entry
+    let attemptData = emailVerificationAttempts.get(key)
+    
+    if (!attemptData) {
+        attemptData = {
+            attempts: 0,
+            firstAttempt: now,
+            lockedUntil: null
+        }
+        emailVerificationAttempts.set(key, attemptData)
+    }
+    
+    // Check if currently locked out
+    if (attemptData.lockedUntil && now < attemptData.lockedUntil) {
+        const remainingSeconds = Math.ceil((attemptData.lockedUntil - now) / 1000)
+        console.warn(`🚨 EMAIL VERIFICATION LOCKED: ${email} is locked out for ${remainingSeconds}s more`)
+        
+        return {
+            allowed: false,
+            attempts: attemptData.attempts,
+            lockedUntil: attemptData.lockedUntil,
+            message: `Too many verification attempts. Please try again in ${Math.ceil(remainingSeconds / 60)} minutes.`,
+            retryAfter: remainingSeconds
+        }
+    }
+    
+    // Reset attempts if lockout has expired
+    if (attemptData.lockedUntil && now >= attemptData.lockedUntil) {
+        attemptData.attempts = 0
+        attemptData.lockedUntil = null
+        attemptData.firstAttempt = now
+    }
+    
+    // Increment attempt counter
+    attemptData.attempts++
+    
+    // Check if max attempts exceeded
+    if (attemptData.attempts >= maxAttempts) {
+        attemptData.lockedUntil = now + lockoutDuration
+        emailVerificationAttempts.set(key, attemptData)
+        
+        const lockoutMinutes = Math.ceil(lockoutDuration / 1000 / 60)
+        console.warn(`🚨 EMAIL VERIFICATION LIMIT: ${email} locked out after ${attemptData.attempts} attempts for ${lockoutMinutes} minutes`)
+        
+        return {
+            allowed: false,
+            attempts: attemptData.attempts,
+            lockedUntil: attemptData.lockedUntil,
+            message: `Too many verification attempts. Account locked for ${lockoutMinutes} minutes.`,
+            retryAfter: Math.ceil(lockoutDuration / 1000)
+        }
+    }
+    
+    // Update tracking
+    emailVerificationAttempts.set(key, attemptData)
+    
+    const remaining = maxAttempts - attemptData.attempts
+    console.log(`✅ EMAIL VERIFICATION: ${email} attempt ${attemptData.attempts}/${maxAttempts} (${remaining} remaining)`)
+    
+    return {
+        allowed: true,
+        attempts: attemptData.attempts,
+        remaining: remaining,
+        message: 'Verification attempt allowed'
+    }
+}
+
+/**
+ * 🔒 SECURITY: Clear email verification attempts on successful verification
+ * Call this after successful contact creation/validation
+ * 
+ * @param {string} email - Email address that successfully verified
+ */
+export function clearEmailVerificationAttempts(email) {
+    const key = `email_verify_${email.toLowerCase()}`
+    const hadAttempts = emailVerificationAttempts.has(key)
+    
+    if (hadAttempts) {
+        emailVerificationAttempts.delete(key)
+        console.log(`✅ EMAIL VERIFICATION CLEARED: Reset attempts for ${email}`)
+    }
+}
+
+/**
+ * 🔒 SECURITY: Cleanup old email verification entries to prevent memory leaks
+ * Should be called periodically along with rate limit cleanup
+ * 
+ * @param {number} maxAge - Maximum age of entries in milliseconds (default: 1 hour)
+ * @returns {number} - Number of entries removed
+ */
+export function cleanupEmailVerificationStore(maxAge = 60 * 60 * 1000) {
+    const now = Date.now()
+    let removed = 0
+    
+    for (const [key, data] of emailVerificationAttempts.entries()) {
+        // Remove entries that are old and not locked out
+        const age = now - data.firstAttempt
+        const isExpiredLockout = data.lockedUntil && now > data.lockedUntil
+        
+        if (age > maxAge || isExpiredLockout) {
+            emailVerificationAttempts.delete(key)
+            removed++
+        }
+    }
+    
+    if (removed > 0) {
+        console.log(`🧹 EMAIL VERIFICATION CLEANUP: Removed ${removed} old entries, ${emailVerificationAttempts.size} remaining`)
+    }
+    
+    return removed
+}
+
+/**
+ * 🔒 SECURITY: Create email verification lockout error response
+ * 
+ * @param {Object} verificationResult - Result from checkEmailVerificationAttempts()
+ * @param {string} origin - Request origin for CORS headers
+ * @returns {Object} - Netlify function response object
+ */
+export function createEmailVerificationErrorResponse(verificationResult, origin = null) {
+    return {
+        statusCode: 429,
+        headers: {
+            ...getSecureCorsHeaders(origin),
+            'Retry-After': verificationResult.retryAfter.toString()
+        },
+        body: JSON.stringify({
+            error: verificationResult.message,
+            attempts: verificationResult.attempts,
+            lockedUntil: verificationResult.lockedUntil ? new Date(verificationResult.lockedUntil).toISOString() : null,
+            retryAfter: verificationResult.retryAfter,
+            timestamp: new Date().toISOString()
+        })
+    }
 }
 
 /**

@@ -17,7 +17,19 @@
  * - Request size limits
  */
 
-import { validateUser, createAuthErrorResponse, createSuccessResponse, sanitizeEmail, buildSecureEmailFilter, getSecureCorsHeaders, checkRateLimit, createRateLimitResponse } from './auth-utils.js'
+import { 
+    validateUser, 
+    createAuthErrorResponse, 
+    createSuccessResponse, 
+    sanitizeEmail, 
+    buildSecureEmailFilter, 
+    getSecureCorsHeaders, 
+    checkRateLimit, 
+    createRateLimitResponse,
+    checkEmailVerificationAttempts,
+    clearEmailVerificationAttempts,
+    createEmailVerificationErrorResponse
+} from './auth-utils.js'
 
 // Security helper functions
 function validateEmail(email) {
@@ -136,6 +148,12 @@ export const handler = async (event) => {
                 return createAuthErrorResponse('Access denied: Can only access your own contact', 403, origin)
             }
 
+            // 🔒 SECURITY: Check email verification attempts (prevents brute force email enumeration)
+            const verificationCheck = checkEmailVerificationAttempts(requestedEmail)
+            if (!verificationCheck.allowed) {
+                return createEmailVerificationErrorResponse(verificationCheck, origin)
+            }
+
             console.log(`${isAdmin ? 'Admin' : 'User'} ${userEmail} looking up contact: ${requestedEmail}`)
 
             // Security: Use secure email sanitization and filter building
@@ -164,6 +182,11 @@ export const handler = async (event) => {
             const data = await response.json()
             const contact = data.value && data.value.length > 0 ? data.value[0] : null
 
+            // 🔒 SECURITY: Clear verification attempts on successful contact lookup
+            if (contact) {
+                clearEmailVerificationAttempts(requestedEmail)
+            }
+
             console.log(`Found ${data.value?.length || 0} contacts for email: ${requestedEmail}`)
 
             return createSuccessResponse({
@@ -186,6 +209,12 @@ export const handler = async (event) => {
             const validationErrors = validateContactData(contactData, userEmail)
             if (validationErrors.length > 0) {
                 return createAuthErrorResponse(`Validation failed: ${validationErrors.join(', ')}`, 400, origin)
+            }
+
+            // 🔒 SECURITY: Check email verification attempts before contact creation
+            const verificationCheck = checkEmailVerificationAttempts(contactData.emailaddress1)
+            if (!verificationCheck.allowed) {
+                return createEmailVerificationErrorResponse(verificationCheck, origin)
             }
 
             // Prepare contact data for Dataverse (sanitized)
@@ -253,6 +282,9 @@ export const handler = async (event) => {
                 result = await response.json()
                 console.log(`Contact created successfully for user ${userEmail} with ID:`, result.contactid)
             }
+
+            // 🔒 SECURITY: Clear verification attempts on successful contact creation/update
+            clearEmailVerificationAttempts(contactData.emailaddress1)
 
             return createSuccessResponse({
                 contact: result,
