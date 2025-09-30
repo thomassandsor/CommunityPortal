@@ -164,20 +164,67 @@ export async function validateSimpleAuth(event) {
 }
 
 /**
+ * 🔒 SECURITY: Get secure CORS headers based on environment
+ * Replaces wildcard CORS with environment-based allowed origins
+ * 
+ * @param {string} origin - Request origin from headers
+ * @returns {Object} - CORS headers object
+ */
+export function getSecureCorsHeaders(origin = null) {
+    const { ALLOWED_ORIGINS, NODE_ENV } = process.env
+    
+    // Development: Allow localhost origins
+    const devOrigins = [
+        'http://localhost:8888',
+        'http://localhost:5173',
+        'http://localhost:3000',
+        'http://127.0.0.1:8888',
+        'http://127.0.0.1:5173'
+    ]
+    
+    // Production: Parse from environment variable (comma-separated)
+    const prodOrigins = ALLOWED_ORIGINS ? ALLOWED_ORIGINS.split(',').map(o => o.trim()) : []
+    
+    // Combine allowed origins based on environment
+    const allowedOrigins = NODE_ENV === 'production' ? prodOrigins : [...devOrigins, ...prodOrigins]
+    
+    // Check if request origin is allowed
+    let allowOrigin = '*' // Fallback for development
+    
+    if (origin && allowedOrigins.length > 0) {
+        if (allowedOrigins.includes(origin)) {
+            allowOrigin = origin // Only allow specific origin
+        } else if (NODE_ENV === 'production') {
+            // In production, if origin not allowed, don't set CORS header
+            // This will cause browser to block the request
+            allowOrigin = 'null'
+        }
+    } else if (allowedOrigins.length > 0 && NODE_ENV === 'production') {
+        // Production with allowed origins configured but no origin header
+        allowOrigin = allowedOrigins[0] // Use first allowed origin as default
+    }
+    
+    return {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': allowOrigin,
+        'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+        'Access-Control-Allow-Methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS',
+        'Access-Control-Max-Age': '86400', // Cache preflight for 24 hours
+        'Vary': 'Origin' // Important: indicates response varies by origin
+    }
+}
+
+/**
  * Create a standardized error response for authentication failures
  * @param {string} message - Error message
  * @param {number} statusCode - HTTP status code (default: 401)
+ * @param {string} origin - Request origin for CORS headers
  * @returns {Object} - Netlify function response object
  */
-export function createAuthErrorResponse(message = 'Authentication required', statusCode = 401) {
+export function createAuthErrorResponse(message = 'Authentication required', statusCode = 401, origin = null) {
     return {
         statusCode,
-        headers: {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-            'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS'
-        },
+        headers: getSecureCorsHeaders(origin),
         body: JSON.stringify({
             error: message,
             timestamp: new Date().toISOString()
@@ -189,17 +236,13 @@ export function createAuthErrorResponse(message = 'Authentication required', sta
  * Create a standardized success response
  * @param {Object} data - Response data
  * @param {number} statusCode - HTTP status code (default: 200)
+ * @param {string} origin - Request origin for CORS headers
  * @returns {Object} - Netlify function response object
  */
-export function createSuccessResponse(data, statusCode = 200) {
+export function createSuccessResponse(data, statusCode = 200, origin = null) {
     return {
         statusCode,
-        headers: {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-            'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-            'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS'
-        },
+        headers: getSecureCorsHeaders(origin),
         body: JSON.stringify(data)
     }
 }

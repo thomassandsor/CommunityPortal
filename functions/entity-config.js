@@ -14,29 +14,28 @@
  * - Caches configurations for performance
  */
 
-import { validateSimpleAuth, createAuthErrorResponse, createSuccessResponse } from './auth-utils.js'
+import { validateSimpleAuth, createAuthErrorResponse, createSuccessResponse, getSecureCorsHeaders } from './auth-utils.js'
 
 // Configuration cache (in production, use Redis or similar)
 const configCache = new Map()
 const CACHE_TTL = 1 * 60 * 1000 // 1 minute (reduced from 5 minutes for faster updates)
 
 export const handler = async (event) => {
+    // Get origin for CORS
+    const origin = event.headers?.origin || event.headers?.Origin || null
+    
     // Handle CORS preflight requests
     if (event.httpMethod === 'OPTIONS') {
         return {
             statusCode: 200,
-            headers: {
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-                'Access-Control-Allow-Methods': 'GET, OPTIONS',
-            },
+            headers: getSecureCorsHeaders(origin),
             body: '',
         }
     }
 
     // Only allow GET requests
     if (event.httpMethod !== 'GET') {
-        return createAuthErrorResponse('Method not allowed', 405)
+        return createAuthErrorResponse('Method not allowed', 405, origin)
     }
 
     try {
@@ -47,7 +46,7 @@ export const handler = async (event) => {
         // Get access token
         const accessToken = await getAccessToken()
         if (!accessToken) {
-            return createAuthErrorResponse('Failed to obtain access token', 500)
+            return createAuthErrorResponse('Failed to obtain access token', 500, origin)
         }
 
         // Check if user is admin (for admin-only configurations)
@@ -70,24 +69,24 @@ export const handler = async (event) => {
         if (entityName) {
             const config = await getEntityConfig(accessToken, entityName, isAdmin)
             if (!config) {
-                return createAuthErrorResponse('Entity configuration not found', 404)
+                return createAuthErrorResponse('Entity configuration not found', 404, origin)
             }
             return createSuccessResponse({
                 config: config,
                 userIsAdmin: isAdmin
-            })
+            }, 200, origin)
         } else {
             const configs = await getAllEntityConfigs(accessToken, isAdmin)
             return createSuccessResponse({
                 configs: configs,
                 userIsAdmin: isAdmin,
                 totalCount: configs.length
-            })
+            }, 200, origin)
         }
 
     } catch (error) {
         console.error('Entity config function error:', error)
-        return createAuthErrorResponse('Internal server error', 500)
+        return createAuthErrorResponse('Internal server error', 500, origin)
     }
 }
 

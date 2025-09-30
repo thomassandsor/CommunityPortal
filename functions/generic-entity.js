@@ -18,18 +18,17 @@
  * - Admin permission checks
  */
 
-import { validateSimpleAuth, createAuthErrorResponse, createSuccessResponse, buildSecureEmailFilter, sanitizeGuid, isValidGuid, validateContactOwnership } from './auth-utils.js'
+import { validateSimpleAuth, createAuthErrorResponse, createSuccessResponse, buildSecureEmailFilter, sanitizeGuid, isValidGuid, validateContactOwnership, getSecureCorsHeaders } from './auth-utils.js'
 
 export const handler = async (event) => {
+    // Get origin for CORS
+    const origin = event.headers?.origin || event.headers?.Origin || null
+    
     // Handle CORS preflight requests
     if (event.httpMethod === 'OPTIONS') {
         return {
             statusCode: 200,
-            headers: {
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-                'Access-Control-Allow-Methods': 'GET, POST, PATCH, DELETE, OPTIONS',
-            },
+            headers: getSecureCorsHeaders(origin),
             body: '',
         }
     }
@@ -56,19 +55,19 @@ export const handler = async (event) => {
         const entitySlugOrName = event.queryStringParameters?.entity
         
         if (!entitySlugOrName) {
-            return createAuthErrorResponse('Entity name is required', 400)
+            return createAuthErrorResponse('Entity name is required', 400, origin)
         }
 
         // Get access token
         const accessToken = await getAccessToken()
         if (!accessToken) {
-            return createAuthErrorResponse('Failed to obtain access token', 500)
+            return createAuthErrorResponse('Failed to obtain access token', 500, origin)
         }
 
         // Resolve URL slug to actual entity logical name
         const entityLogicalName = await resolveEntityName(entitySlugOrName, accessToken)
         if (!entityLogicalName) {
-            return createAuthErrorResponse('Entity not found or not configured', 404)
+            return createAuthErrorResponse('Entity not found or not configured', 404, origin)
         }
 
         // Get entity configuration
@@ -78,7 +77,7 @@ export const handler = async (event) => {
         
         if (!entityConfig) {
             console.error(`❌ ENTITY CONFIG NOT FOUND for: ${entityLogicalName}`)
-            return createAuthErrorResponse(`Entity configuration not found for ${entityLogicalName}. Please create a configuration record in cp_entityconfigurations table.`, 404)
+            return createAuthErrorResponse(`Entity configuration not found for ${entityLogicalName}. Please create a configuration record in cp_entityconfigurations table.`, 404, origin)
         }
         
         console.log(`✅ ENTITY CONFIG LOADED:`, {
@@ -105,7 +104,7 @@ export const handler = async (event) => {
         
         if (!contactGuid) {
             console.error('🛡️ SECURITY VIOLATION: No contact GUID provided')
-            return createAuthErrorResponse('Contact GUID required for secure data access', 401)
+            return createAuthErrorResponse('Contact GUID required for secure data access', 401, origin)
         }
         
         // 🔒 SECURITY: Validate and sanitize contact GUID using centralized utility
@@ -117,7 +116,7 @@ export const handler = async (event) => {
             console.log(`✅ SECURITY: Contact GUID validated and sanitized: ${contactGuid}`)
         } catch (guidError) {
             console.error(`🛡️ SECURITY VIOLATION: ${guidError.message}`)
-            return createAuthErrorResponse(guidError.message, 401)
+            return createAuthErrorResponse(guidError.message, 401, origin)
         }
         
         // 🔒 CRITICAL SECURITY: Verify the contact GUID belongs to the authenticated user
@@ -126,18 +125,18 @@ export const handler = async (event) => {
             console.log(`✅ OWNERSHIP: Contact ${contactGuid} ownership verified for user ${user.userId}`)
         } catch (ownershipError) {
             console.error(`🛡️ OWNERSHIP VIOLATION: ${ownershipError.message}`)
-            return createAuthErrorResponse(`Access denied: ${ownershipError.message}`, 403)
+            return createAuthErrorResponse(`Access denied: ${ownershipError.message}`, 403, origin)
         }
         if (!userContact || !userContact.contactid) {
             console.error(`🛡️ SECURITY VIOLATION: No contact record found for GUID: ${contactGuid}`)
-            return createAuthErrorResponse('Contact record not found or invalid', 403)
+            return createAuthErrorResponse('Contact record not found or invalid', 403, origin)
         }
 
         console.log(`🛡️ SECURITY: User verified - Contact ID: ${userContact.contactid}`)
 
         // Check admin permissions if required
         if (entityConfig.requiresAdmin && (!userContact || !userContact.cp_portaladmin)) {
-            return createAuthErrorResponse('Admin access required for this entity', 403)
+            return createAuthErrorResponse('Admin access required for this entity', 403, origin)
         }
 
         // Route to appropriate handler based on HTTP method and parameters
@@ -147,37 +146,37 @@ export const handler = async (event) => {
         switch (event.httpMethod) {
             case 'GET':
                 if (mode === 'list') {
-                    return await handleListRequest(accessToken, entityConfig, userContact, viewMode)
+                    return await handleListRequest(accessToken, entityConfig, userContact, viewMode, origin)
                 } else if (mode === 'form') {
-                    return await handleFormMetadataRequest(accessToken, entityConfig, userContact)
+                    return await handleFormMetadataRequest(accessToken, entityConfig, userContact, origin)
                 } else if (entityId) {
-                    return await handleSingleEntityRequest(accessToken, entityConfig, userContact, entityId)
+                    return await handleSingleEntityRequest(accessToken, entityConfig, userContact, entityId, origin)
                 } else {
-                    return await handleListRequest(accessToken, entityConfig, userContact, viewMode)
+                    return await handleListRequest(accessToken, entityConfig, userContact, viewMode, origin)
                 }
 
             case 'POST':
-                return await handleCreateRequest(accessToken, entityConfig, userContact, event.body)
+                return await handleCreateRequest(accessToken, entityConfig, userContact, event.body, origin)
 
             case 'PATCH':
                 if (!entityId) {
-                    return createAuthErrorResponse('Entity ID is required for update', 400)
+                    return createAuthErrorResponse('Entity ID is required for update', 400, origin)
                 }
-                return await handleUpdateRequest(accessToken, entityConfig, userContact, entityId, event.body)
+                return await handleUpdateRequest(accessToken, entityConfig, userContact, entityId, event.body, origin)
 
             case 'DELETE':
                 if (!entityId) {
-                    return createAuthErrorResponse('Entity ID is required for delete', 400)
+                    return createAuthErrorResponse('Entity ID is required for delete', 400, origin)
                 }
-                return await handleDeleteRequest(accessToken, entityConfig, userContact, entityId)
+                return await handleDeleteRequest(accessToken, entityConfig, userContact, entityId, origin)
 
             default:
-                return createAuthErrorResponse('Method not allowed', 405)
+                return createAuthErrorResponse('Method not allowed', 405, origin)
         }
 
     } catch (error) {
         console.error('Generic entity function error:', error)
-        return createAuthErrorResponse(`Internal server error: ${error.message}`, 500)
+        return createAuthErrorResponse(`Internal server error: ${error.message}`, 500, origin)
     }
 }
 
@@ -223,7 +222,7 @@ async function getEntityMetadata(accessToken, entityLogicalName) {
 /**
  * Handle list request - get entities with view metadata
  */
-async function handleListRequest(accessToken, entityConfig, userContact, viewMode = 'personal') {
+async function handleListRequest(accessToken, entityConfig, userContact, viewMode = 'personal', origin = null) {
     const { DATAVERSE_URL } = process.env
     
     // Get view metadata if available
@@ -303,13 +302,13 @@ async function handleListRequest(accessToken, entityConfig, userContact, viewMod
         totalCount: entities.length,
         mode: 'list',
         userIsAdmin: !!userContact?.cp_portaladmin
-    })
+    }, 200, origin)
 }
 
 /**
  * Handle form metadata request
  */
-async function handleFormMetadataRequest(accessToken, entityConfig, userContact) {
+async function handleFormMetadataRequest(accessToken, entityConfig, userContact, origin = null) {
     console.log(`🔍 Fetching form metadata for ${entityConfig.entityLogicalName}...`)
     
     if (!entityConfig.formGuid) {
@@ -322,13 +321,13 @@ async function handleFormMetadataRequest(accessToken, entityConfig, userContact)
         formMetadata: formMetadata,
         entityConfig: entityConfig,
         mode: 'form'
-    })
+    }, 200, origin)
 }
 
 /**
  * Handle single entity request - ENHANCED USER SCOPING
  */
-async function handleSingleEntityRequest(accessToken, entityConfig, userContact, entityId) {
+async function handleSingleEntityRequest(accessToken, entityConfig, userContact, entityId, origin = null) {
     console.log(`🔍 Fetching single ${entityConfig.entityLogicalName}: ${entityId} for user: ${userContact.contactid}`)
     
     const { DATAVERSE_URL } = process.env
@@ -466,13 +465,13 @@ async function handleSingleEntityRequest(accessToken, entityConfig, userContact,
         entity: entity,
         entityConfig: entityConfig,
         mode: 'single'
-    })
+    }, 200, origin)
 }
 
 /**
  * Handle create request
  */
-async function handleCreateRequest(accessToken, entityConfig, userContact, requestBody) {
+async function handleCreateRequest(accessToken, entityConfig, userContact, requestBody, origin = null) {
     console.log(`📝 Creating new ${entityConfig.entityLogicalName}...`)
     
     if (!requestBody) {
@@ -545,7 +544,7 @@ async function handleCreateRequest(accessToken, entityConfig, userContact, reque
         entityId: entityId,
         entityConfig: entityConfig,
         mode: 'create'
-    })
+    }, 200, origin)
 }
 
 /**
@@ -777,7 +776,7 @@ function sanitizeRichTextForDataverse(html) {
 /**
  * Handle update request
  */
-async function handleUpdateRequest(accessToken, entityConfig, userContact, entityId, requestBody) {
+async function handleUpdateRequest(accessToken, entityConfig, userContact, entityId, requestBody, origin = null) {
     console.log(`� UPDATE REQUEST RECEIVED 🚨`)
     console.log(`�📝 Updating ${entityConfig.entityLogicalName}: ${entityId}`)
     console.log(`📦 Request body length: ${requestBody?.length || 0} characters`)
@@ -870,13 +869,13 @@ async function handleUpdateRequest(accessToken, entityConfig, userContact, entit
         entityId: entityId,
         entityConfig: entityConfig,
         mode: 'update'
-    })
+    }, 200, origin)
 }
 
 /**
  * Handle delete request - ENHANCED USER SCOPING
  */
-async function handleDeleteRequest(accessToken, entityConfig, userContact, entityId) {
+async function handleDeleteRequest(accessToken, entityConfig, userContact, entityId, origin = null) {
     console.log(`🗑️ Deleting ${entityConfig.entityLogicalName}: ${entityId} for user: ${userContact.contactid}`)
     
     const { DATAVERSE_URL } = process.env
@@ -938,7 +937,7 @@ async function handleDeleteRequest(accessToken, entityConfig, userContact, entit
         entityId: entityId,
         entityConfig: entityConfig,
         mode: 'delete'
-    })
+    }, 200, origin)
 }
 
 /**

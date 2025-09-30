@@ -17,7 +17,7 @@
  * - Request size limits
  */
 
-import { validateUser, createAuthErrorResponse, createSuccessResponse, sanitizeEmail, buildSecureEmailFilter } from './auth-utils.js'
+import { validateUser, createAuthErrorResponse, createSuccessResponse, sanitizeEmail, buildSecureEmailFilter, getSecureCorsHeaders } from './auth-utils.js'
 
 // Rate limiting storage (in production, use Redis or similar)
 const rateLimits = new Map()
@@ -93,15 +93,14 @@ function checkRateLimit(userEmail) {
 }
 
 export const handler = async (event) => {
+    // Get origin for CORS
+    const origin = event.headers?.origin || event.headers?.Origin || null
+    
     // Handle CORS preflight requests
     if (event.httpMethod === 'OPTIONS') {
         return {
             statusCode: 200,
-            headers: {
-                'Access-Control-Allow-Origin': '*',
-                'Access-Control-Allow-Headers': 'Content-Type, Authorization',
-                'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-            },
+            headers: getSecureCorsHeaders(origin),
             body: '',
         }
     }
@@ -112,7 +111,7 @@ export const handler = async (event) => {
         try {
             user = await validateUser(event)
         } catch (authError) {
-            return createAuthErrorResponse(authError.message)
+            return createAuthErrorResponse(authError.message, 401, origin)
         }
 
         const { userEmail } = user
@@ -120,7 +119,7 @@ export const handler = async (event) => {
         // Security: Check request size limit (1MB)
         const maxBodySize = 1024 * 1024 // 1MB
         if (event.body && Buffer.byteLength(event.body, 'utf8') > maxBodySize) {
-            return createAuthErrorResponse('Request payload too large', 413)
+            return createAuthErrorResponse('Request payload too large', 413, origin)
         }
 
         // Security: Rate limiting per authenticated user
@@ -130,9 +129,7 @@ export const handler = async (event) => {
             return {
                 statusCode: 429,
                 headers: {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+                    ...getSecureCorsHeaders(origin),
                     'Retry-After': '60',
                 },
                 body: JSON.stringify({ error: rateLimitError.message }),
@@ -144,7 +141,7 @@ export const handler = async (event) => {
 
         if (!DATAVERSE_URL) {
             console.error('Missing DATAVERSE_URL environment variable')
-            return createAuthErrorResponse('Server configuration error', 500)
+            return createAuthErrorResponse('Server configuration error', 500, origin)
         }
 
         // Log available environment variables for debugging (first occurrence)
@@ -155,7 +152,7 @@ export const handler = async (event) => {
         // Get access token by calling our auth function
         const accessToken = await getAccessToken()
         if (!accessToken) {
-            return createAuthErrorResponse('Failed to obtain access token', 500)
+            return createAuthErrorResponse('Failed to obtain access token', 500, origin)
         }
 
         // Get user's admin status
@@ -166,12 +163,12 @@ export const handler = async (event) => {
             const requestedEmail = event.queryStringParameters?.email
 
             if (!requestedEmail) {
-                return createAuthErrorResponse('Email parameter is required', 400)
+                return createAuthErrorResponse('Email parameter is required', 400, origin)
             }
 
             // SECURITY: Ensure user can only access their own contact data (unless admin)
             if (!isAdmin && requestedEmail.toLowerCase() !== userEmail.toLowerCase()) {
-                return createAuthErrorResponse('Access denied: Can only access your own contact', 403)
+                return createAuthErrorResponse('Access denied: Can only access your own contact', 403, origin)
             }
 
             console.log(`${isAdmin ? 'Admin' : 'User'} ${userEmail} looking up contact: ${requestedEmail}`)
@@ -196,7 +193,7 @@ export const handler = async (event) => {
             if (!response.ok) {
                 const errorText = await response.text()
                 console.error('Dataverse GET request failed:', response.status, errorText)
-                return createAuthErrorResponse('Failed to fetch contact from Dataverse', response.status)
+                return createAuthErrorResponse('Failed to fetch contact from Dataverse', response.status, origin)
             }
 
             const data = await response.json()
@@ -208,7 +205,7 @@ export const handler = async (event) => {
                 contact,
                 found: !!contact,
                 isAdmin
-            })
+            }, 200, origin)
         }
 
         // Handle POST request - create or update contact
@@ -217,13 +214,13 @@ export const handler = async (event) => {
             try {
                 contactData = JSON.parse(event.body || '{}')
             } catch (parseError) {
-                return createAuthErrorResponse('Invalid JSON in request body', 400)
+                return createAuthErrorResponse('Invalid JSON in request body', 400, origin)
             }
 
             // Security: Validate all input data with authenticated user context
             const validationErrors = validateContactData(contactData, userEmail)
             if (validationErrors.length > 0) {
-                return createAuthErrorResponse(`Validation failed: ${validationErrors.join(', ')}`, 400)
+                return createAuthErrorResponse(`Validation failed: ${validationErrors.join(', ')}`, 400, origin)
             }
 
             // Prepare contact data for Dataverse (sanitized)
@@ -257,7 +254,7 @@ export const handler = async (event) => {
                 if (!response.ok) {
                     const errorText = await response.text()
                     console.error('Dataverse PATCH request failed:', response.status, errorText)
-                    return createAuthErrorResponse('Failed to update contact in Dataverse', response.status)
+                    return createAuthErrorResponse('Failed to update contact in Dataverse', response.status, origin)
                 }
 
                 // For PATCH requests, return the updated contact
@@ -285,7 +282,7 @@ export const handler = async (event) => {
                 if (!response.ok) {
                     const errorText = await response.text()
                     console.error('Dataverse POST request failed:', response.status, errorText)
-                    return createAuthErrorResponse('Failed to create contact in Dataverse', response.status)
+                    return createAuthErrorResponse('Failed to create contact in Dataverse', response.status, origin)
                 }
 
                 result = await response.json()
@@ -296,15 +293,15 @@ export const handler = async (event) => {
                 contact: result,
                 created: !contactData.contactid,
                 isAdmin
-            })
+            }, 200, origin)
         }
 
         // Method not allowed
-        return createAuthErrorResponse('Method not allowed', 405)
+        return createAuthErrorResponse('Method not allowed', 405, origin)
 
     } catch (error) {
         console.error('Contact function error:', error)
-        return createAuthErrorResponse('Internal server error', 500)
+        return createAuthErrorResponse('Internal server error', 500, origin)
     }
 }
 

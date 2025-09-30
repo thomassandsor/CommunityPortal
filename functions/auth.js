@@ -12,7 +12,10 @@
  * - Secure token expiry handling
  * - Environment variable validation
  * - Request logging without sensitive data
+ * - Secure CORS configuration
  */
+
+import { getSecureCorsHeaders } from './auth-utils.js'
 
 // In-memory token cache (use Redis/database in production for multi-instance deployments)
 let tokenCache = {
@@ -22,14 +25,14 @@ let tokenCache = {
 }
 
 export const handler = async (event) => {
+    // Get origin for CORS
+    const origin = event.headers?.origin || event.headers?.Origin || null
+    
     // Only allow POST requests
     if (event.httpMethod !== 'POST') {
         return {
             statusCode: 405,
-            headers: {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-            },
+            headers: getSecureCorsHeaders(origin),
             body: JSON.stringify({ error: 'Method not allowed' }),
         }
     }
@@ -48,10 +51,7 @@ export const handler = async (event) => {
             console.error('Missing required environment variables')
             return {
                 statusCode: 500,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                },
+                headers: getSecureCorsHeaders(origin),
                 body: JSON.stringify({
                     error: 'Server configuration error: Missing required environment variables'
                 }),
@@ -69,10 +69,7 @@ export const handler = async (event) => {
             console.log('Returning cached access token')
             return {
                 statusCode: 200,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                },
+                headers: getSecureCorsHeaders(origin),
                 body: JSON.stringify({
                     access_token: tokenCache.token,
                     expires_in: Math.floor((tokenCache.expiry - Date.now()) / 1000),
@@ -110,10 +107,7 @@ export const handler = async (event) => {
 
             return {
                 statusCode: 401,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                },
+                headers: getSecureCorsHeaders(origin),
                 body: JSON.stringify({
                     error: 'Authentication failed',
                     details: `Token request failed with status ${response.status}`
@@ -128,10 +122,7 @@ export const handler = async (event) => {
             console.error('No access token in response')
             return {
                 statusCode: 401,
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Access-Control-Allow-Origin': '*',
-                },
+                headers: getSecureCorsHeaders(origin),
                 body: JSON.stringify({
                     error: 'Authentication failed',
                     details: 'No access token received'
@@ -152,10 +143,7 @@ export const handler = async (event) => {
         // Return the access token
         return {
             statusCode: 200,
-            headers: {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-            },
+            headers: getSecureCorsHeaders(origin),
             body: JSON.stringify({
                 access_token: tokenData.access_token,
                 expires_in: expiresIn,
@@ -169,10 +157,7 @@ export const handler = async (event) => {
 
         return {
             statusCode: 500,
-            headers: {
-                'Content-Type': 'application/json',
-                'Access-Control-Allow-Origin': '*',
-            },
+            headers: getSecureCorsHeaders(origin),
             body: JSON.stringify({
                 error: 'Internal server error',
                 details: error.message
