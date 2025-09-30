@@ -262,3 +262,85 @@ export function buildSecureEmailFilter(email) {
     
     return `emailaddress1 eq '${escapedEmail}'`
 }
+
+/**
+ * 🔒 SECURITY: Validate GUID format to prevent OData injection
+ * @param {string} guid - GUID to validate
+ * @returns {boolean} - True if valid GUID format
+ */
+export function isValidGuid(guid) {
+    if (!guid || typeof guid !== 'string') {
+        return false
+    }
+    
+    // Standard GUID format: 8-4-4-4-12 hexadecimal digits
+    // Example: 550e8400-e29b-41d4-a716-446655440000
+    const guidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+    
+    return guidRegex.test(guid.trim())
+}
+
+/**
+ * 🔒 SECURITY: Sanitize and validate GUID input
+ * @param {string} guid - GUID to sanitize and validate
+ * @param {string} paramName - Parameter name for error messages
+ * @returns {string} - Sanitized GUID in lowercase
+ * @throws {Error} - If GUID is invalid
+ */
+export function sanitizeGuid(guid, paramName = 'GUID') {
+    if (!guid || typeof guid !== 'string') {
+        throw new Error(`${paramName} is required and must be a string`)
+    }
+    
+    // Remove any whitespace
+    const trimmedGuid = guid.trim()
+    
+    // Validate GUID format
+    if (!isValidGuid(trimmedGuid)) {
+        throw new Error(`${paramName} has invalid format. Expected format: xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx`)
+    }
+    
+    // Return lowercase for consistency
+    return trimmedGuid.toLowerCase()
+}
+
+/**
+ * 🔒 SECURITY: Sanitize OData query input to prevent injection
+ * @param {string} input - Input string to sanitize
+ * @returns {string} - Sanitized input safe for OData queries
+ */
+export function sanitizeODataInput(input) {
+    if (!input || typeof input !== 'string') {
+        return ''
+    }
+    
+    // Remove or escape dangerous characters for OData
+    return input
+        .replace(/\\/g, '\\\\')    // Escape backslashes
+        .replace(/'/g, "''")       // Escape single quotes (OData standard)
+        .replace(/"/g, '""')       // Escape double quotes
+        .replace(/;/g, '')         // Remove semicolons (command separator)
+        .replace(/--/g, '')        // Remove SQL comment markers
+        .replace(/\/\*/g, '')      // Remove block comment start
+        .replace(/\*\//g, '')      // Remove block comment end
+        .replace(/%/g, '\\%')      // Escape wildcard
+        .replace(/_/g, '\\_')      // Escape underscore wildcard
+        .trim()
+}
+
+/**
+ * 🔒 SECURITY: Build secure OData filter for GUID field
+ * @param {string} fieldName - Field name (e.g., 'contactid', '_cp_contact_value')
+ * @param {string} guid - GUID value (will be validated and sanitized)
+ * @returns {string} - Safe OData filter string
+ */
+export function buildSecureGuidFilter(fieldName, guid) {
+    // Validate and sanitize the GUID
+    const sanitizedGuid = sanitizeGuid(guid, fieldName)
+    
+    // Sanitize field name to prevent injection through field name
+    const sanitizedFieldName = sanitizeODataInput(fieldName)
+    
+    // Build the filter with properly quoted GUID
+    return `${sanitizedFieldName} eq '${sanitizedGuid}'`
+}

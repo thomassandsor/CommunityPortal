@@ -18,7 +18,7 @@
  * - Admin permission checks
  */
 
-import { validateSimpleAuth, createAuthErrorResponse, createSuccessResponse, buildSecureEmailFilter } from './auth-utils.js'
+import { validateSimpleAuth, createAuthErrorResponse, createSuccessResponse, buildSecureEmailFilter, sanitizeGuid, isValidGuid } from './auth-utils.js'
 
 export const handler = async (event) => {
     // Handle CORS preflight requests
@@ -108,20 +108,16 @@ export const handler = async (event) => {
             return createAuthErrorResponse('Contact GUID required for secure data access', 401)
         }
         
-        // Validate contact GUID format (Microsoft Dataverse GUID pattern)
+        // 🔒 SECURITY: Validate and sanitize contact GUID using centralized utility
         console.log(`🔍 SECURITY: Validating Contact GUID: "${contactGuid}"`)
-        console.log(`🔍 SECURITY: GUID length: ${contactGuid.length}`)
-        console.log(`🔍 SECURITY: GUID segments: ${contactGuid.split('-').map(s => s.length).join('-')}`)
         
-        const guidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
-        const isValidGuid = guidPattern.test(contactGuid)
-        
-        console.log(`🔍 SECURITY: GUID validation result: ${isValidGuid}`)
-        
-        if (!isValidGuid) {
-            console.error(`🛡️ SECURITY VIOLATION: Invalid contact GUID format: ${contactGuid}`)
-            console.error(`🛡️ GUID pattern check: expected 8-4-4-4-12, got segments: ${contactGuid.split('-').map(s => s.length).join('-')}`)
-            return createAuthErrorResponse('Invalid contact GUID format', 401)
+        try {
+            // Use the new secure GUID validation function
+            contactGuid = sanitizeGuid(contactGuid, 'Contact GUID')
+            console.log(`✅ SECURITY: Contact GUID validated and sanitized: ${contactGuid}`)
+        } catch (guidError) {
+            console.error(`🛡️ SECURITY VIOLATION: ${guidError.message}`)
+            return createAuthErrorResponse(guidError.message, 401)
         }
         
         // Verify the contact exists in Dataverse
