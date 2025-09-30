@@ -14,7 +14,7 @@
  * - Caches configurations for performance
  */
 
-import { validateSimpleAuth, createAuthErrorResponse, createSuccessResponse, getSecureCorsHeaders, checkRateLimit, createRateLimitResponse } from './auth-utils.js'
+import { validateSimpleAuth, createAuthErrorResponse, createSuccessResponse, getSecureCorsHeaders, checkRateLimit, createRateLimitResponse, createSafeErrorResponse } from './auth-utils.js'
 
 // Configuration cache (in production, use Redis or similar)
 const configCache = new Map()
@@ -96,8 +96,8 @@ export const handler = async (event) => {
         }
 
     } catch (error) {
-        console.error('Entity config function error:', error)
-        return createAuthErrorResponse('Internal server error', 500, origin)
+        // 🔒 SECURITY: Use safe error response that sanitizes internal details
+        return createSafeErrorResponse(error, 'entity-config-operation', origin)
     }
 }
 

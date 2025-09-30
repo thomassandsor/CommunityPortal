@@ -18,7 +18,7 @@
  * - Admin permission checks
  */
 
-import { validateSimpleAuth, createAuthErrorResponse, createSuccessResponse, buildSecureEmailFilter, sanitizeGuid, isValidGuid, validateContactOwnership, getSecureCorsHeaders, checkRateLimit, createRateLimitResponse } from './auth-utils.js'
+import { validateSimpleAuth, createAuthErrorResponse, createSuccessResponse, buildSecureEmailFilter, sanitizeGuid, isValidGuid, validateContactOwnership, getSecureCorsHeaders, checkRateLimit, createRateLimitResponse, createSafeErrorResponse } from './auth-utils.js'
 
 export const handler = async (event) => {
     // Get origin for CORS
@@ -186,8 +186,8 @@ export const handler = async (event) => {
         }
 
     } catch (error) {
-        console.error('Generic entity function error:', error)
-        return createAuthErrorResponse(`Internal server error: ${error.message}`, 500, origin)
+        // 🔒 SECURITY: Use safe error response that sanitizes internal details
+        return createSafeErrorResponse(error, 'generic-entity-operation', origin)
     }
 }
 

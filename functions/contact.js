@@ -28,7 +28,9 @@ import {
     createRateLimitResponse,
     checkEmailVerificationAttempts,
     clearEmailVerificationAttempts,
-    createEmailVerificationErrorResponse
+    createEmailVerificationErrorResponse,
+    createSafeErrorResponse,
+    withErrorHandling
 } from './auth-utils.js'
 
 // Security helper functions
@@ -297,8 +299,8 @@ export const handler = async (event) => {
         return createAuthErrorResponse('Method not allowed', 405, origin)
 
     } catch (error) {
-        console.error('Contact function error:', error)
-        return createAuthErrorResponse('Internal server error', 500, origin)
+        // 🔒 SECURITY: Use safe error response that sanitizes internal details
+        return createSafeErrorResponse(error, 'contact-operation', origin)
     }
 }
 

@@ -4,6 +4,43 @@ const rateLimitStore = new Map()
 // 🔒 EMAIL VERIFICATION: In-memory storage for verification attempt tracking
 const emailVerificationAttempts = new Map()
 
+// 🔒 ERROR HANDLING: Error type to generic message mapping
+const ERROR_MESSAGES = {
+    // Authentication errors
+    'AUTHENTICATION_FAILED': 'Authentication failed. Please sign in again.',
+    'TOKEN_EXPIRED': 'Your session has expired. Please sign in again.',
+    'TOKEN_INVALID': 'Invalid authentication token. Please sign in again.',
+    'UNAUTHORIZED': 'You are not authorized to perform this action.',
+    
+    // Validation errors
+    'VALIDATION_FAILED': 'Invalid input. Please check your data and try again.',
+    'INVALID_EMAIL': 'Invalid email address format.',
+    'INVALID_GUID': 'Invalid identifier format.',
+    'REQUIRED_FIELD': 'Required field is missing.',
+    
+    // Resource errors
+    'NOT_FOUND': 'The requested resource was not found.',
+    'ALREADY_EXISTS': 'This resource already exists.',
+    'OWNERSHIP_VIOLATION': 'Access denied. You do not have permission to access this resource.',
+    
+    // Rate limiting
+    'RATE_LIMIT_EXCEEDED': 'Too many requests. Please try again later.',
+    'EMAIL_VERIFICATION_LOCKED': 'Too many verification attempts. Please try again later.',
+    
+    // Server errors
+    'DATAVERSE_ERROR': 'Unable to process your request. Please try again later.',
+    'DATABASE_ERROR': 'A database error occurred. Please try again later.',
+    'CONFIGURATION_ERROR': 'Server configuration error. Please contact support.',
+    'INTERNAL_ERROR': 'An unexpected error occurred. Please try again later.',
+    
+    // Network errors
+    'NETWORK_ERROR': 'Network error. Please check your connection and try again.',
+    'TIMEOUT_ERROR': 'Request timed out. Please try again.',
+    
+    // Default
+    'UNKNOWN_ERROR': 'An unexpected error occurred. Please try again later.'
+}
+
 /**
  * 🔒 SECURITY: Rate limiting middleware to prevent abuse and DoS attacks
  * Tracks requests per identifier (IP or user ID) with automatic cleanup
@@ -253,6 +290,164 @@ export function createEmailVerificationErrorResponse(verificationResult, origin 
             retryAfter: verificationResult.retryAfter,
             timestamp: new Date().toISOString()
         })
+    }
+}
+
+/**
+ * 🔒 SECURITY: Sanitize error for client response
+ * Maps internal errors to safe, generic messages while preserving details for server logs
+ * 
+ * @param {Error|string} error - Error object or message
+ * @param {string} context - Context for logging (e.g., 'contact-lookup', 'entity-create')
+ * @returns {Object} - Sanitized error info with errorType and clientMessage
+ */
+export function sanitizeError(error, context = 'unknown') {
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    const errorStack = error instanceof Error ? error.stack : null
+    
+    // Log full error details server-side (will appear in Netlify logs)
+    console.error(`❌ ERROR [${context}]:`, errorMessage)
+    if (errorStack) {
+        console.error('Stack trace:', errorStack)
+    }
+    
+    // Determine error type based on message content
+    let errorType = 'UNKNOWN_ERROR'
+    let statusCode = 500
+    
+    // Authentication/Authorization errors
+    if (errorMessage.includes('authentication') || errorMessage.includes('token') || errorMessage.includes('unauthorized')) {
+        if (errorMessage.includes('expired')) {
+            errorType = 'TOKEN_EXPIRED'
+            statusCode = 401
+        } else if (errorMessage.includes('invalid')) {
+            errorType = 'TOKEN_INVALID'
+            statusCode = 401
+        } else {
+            errorType = 'AUTHENTICATION_FAILED'
+            statusCode = 401
+        }
+    }
+    // Validation errors
+    else if (errorMessage.includes('validation') || errorMessage.includes('invalid format') || errorMessage.includes('required')) {
+        if (errorMessage.includes('email')) {
+            errorType = 'INVALID_EMAIL'
+        } else if (errorMessage.includes('GUID') || errorMessage.includes('identifier')) {
+            errorType = 'INVALID_GUID'
+        } else if (errorMessage.includes('required')) {
+            errorType = 'REQUIRED_FIELD'
+        } else {
+            errorType = 'VALIDATION_FAILED'
+        }
+        statusCode = 400
+    }
+    // Resource errors
+    else if (errorMessage.includes('not found') || errorMessage.includes('does not exist')) {
+        errorType = 'NOT_FOUND'
+        statusCode = 404
+    }
+    else if (errorMessage.includes('already exists')) {
+        errorType = 'ALREADY_EXISTS'
+        statusCode = 409
+    }
+    else if (errorMessage.includes('ownership') || errorMessage.includes('access denied') || errorMessage.includes('permission')) {
+        errorType = 'OWNERSHIP_VIOLATION'
+        statusCode = 403
+    }
+    // Rate limiting
+    else if (errorMessage.includes('rate limit')) {
+        errorType = 'RATE_LIMIT_EXCEEDED'
+        statusCode = 429
+    }
+    else if (errorMessage.includes('verification') && errorMessage.includes('locked')) {
+        errorType = 'EMAIL_VERIFICATION_LOCKED'
+        statusCode = 429
+    }
+    // Server/External errors
+    else if (errorMessage.includes('Dataverse') || errorMessage.includes('OData')) {
+        errorType = 'DATAVERSE_ERROR'
+        statusCode = 502
+    }
+    else if (errorMessage.includes('database') || errorMessage.includes('SQL')) {
+        errorType = 'DATABASE_ERROR'
+        statusCode = 502
+    }
+    else if (errorMessage.includes('configuration') || errorMessage.includes('environment')) {
+        errorType = 'CONFIGURATION_ERROR'
+        statusCode = 500
+    }
+    else if (errorMessage.includes('network') || errorMessage.includes('fetch failed')) {
+        errorType = 'NETWORK_ERROR'
+        statusCode = 503
+    }
+    else if (errorMessage.includes('timeout')) {
+        errorType = 'TIMEOUT_ERROR'
+        statusCode = 504
+    }
+    
+    return {
+        errorType,
+        statusCode,
+        clientMessage: ERROR_MESSAGES[errorType] || ERROR_MESSAGES['UNKNOWN_ERROR'],
+        serverMessage: errorMessage, // For server-side logging only
+        context
+    }
+}
+
+/**
+ * 🔒 SECURITY: Create safe error response for clients
+ * Prevents internal error details from leaking while maintaining server logs
+ * 
+ * @param {Error|string} error - Error object or message
+ * @param {string} context - Context for logging (e.g., 'contact-lookup')
+ * @param {string} origin - Request origin for CORS headers
+ * @param {Object} additionalData - Optional additional data to include (non-sensitive only)
+ * @returns {Object} - Netlify function response object
+ */
+export function createSafeErrorResponse(error, context = 'unknown', origin = null, additionalData = {}) {
+    const sanitized = sanitizeError(error, context)
+    
+    // Determine if we're in development mode
+    const { NODE_ENV } = process.env
+    const isDevelopment = NODE_ENV !== 'production'
+    
+    return {
+        statusCode: sanitized.statusCode,
+        headers: getSecureCorsHeaders(origin),
+        body: JSON.stringify({
+            error: sanitized.clientMessage,
+            errorType: sanitized.errorType,
+            // Only include detailed error in development
+            ...(isDevelopment && { details: sanitized.serverMessage }),
+            ...additionalData,
+            timestamp: new Date().toISOString()
+        })
+    }
+}
+
+/**
+ * 🔒 SECURITY: Wrap async function with error handling
+ * Automatically sanitizes errors and returns safe responses
+ * 
+ * @param {Function} handler - Async function to wrap
+ * @param {string} context - Context for error logging
+ * @returns {Function} - Wrapped function with error handling
+ */
+export function withErrorHandling(handler, context) {
+    return async (event, ...args) => {
+        const origin = event.headers?.origin || event.headers?.Origin || null
+        
+        try {
+            return await handler(event, ...args)
+        } catch (error) {
+            // Error already handled and response created
+            if (error.statusCode && error.body) {
+                return error
+            }
+            
+            // Create safe error response
+            return createSafeErrorResponse(error, context, origin)
+        }
     }
 }
 
