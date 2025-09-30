@@ -18,7 +18,7 @@
  * - Admin permission checks
  */
 
-import { validateSimpleAuth, createAuthErrorResponse, createSuccessResponse, buildSecureEmailFilter, sanitizeGuid, isValidGuid } from './auth-utils.js'
+import { validateSimpleAuth, createAuthErrorResponse, createSuccessResponse, buildSecureEmailFilter, sanitizeGuid, isValidGuid, validateContactOwnership } from './auth-utils.js'
 
 export const handler = async (event) => {
     // Handle CORS preflight requests
@@ -120,8 +120,14 @@ export const handler = async (event) => {
             return createAuthErrorResponse(guidError.message, 401)
         }
         
-        // Verify the contact exists in Dataverse
-        userContact = await getUserContactByGuid(accessToken, contactGuid)
+        // 🔒 CRITICAL SECURITY: Verify the contact GUID belongs to the authenticated user
+        try {
+            userContact = await validateContactOwnership(contactGuid, user, accessToken)
+            console.log(`✅ OWNERSHIP: Contact ${contactGuid} ownership verified for user ${user.userId}`)
+        } catch (ownershipError) {
+            console.error(`🛡️ OWNERSHIP VIOLATION: ${ownershipError.message}`)
+            return createAuthErrorResponse(`Access denied: ${ownershipError.message}`, 403)
+        }
         if (!userContact || !userContact.contactid) {
             console.error(`🛡️ SECURITY VIOLATION: No contact record found for GUID: ${contactGuid}`)
             return createAuthErrorResponse('Contact record not found or invalid', 403)

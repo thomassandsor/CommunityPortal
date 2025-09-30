@@ -344,3 +344,78 @@ export function buildSecureGuidFilter(fieldName, guid) {
     // Build the filter with properly quoted GUID
     return `${sanitizedFieldName} eq '${sanitizedGuid}'`
 }
+
+/**
+ * 🔒 SECURITY: Validate that a contact GUID belongs to the authenticated user
+ * This prevents users from accessing other users' data by manipulating contact GUID parameters.
+ * 
+ * @param {string} contactGuid - The contact GUID to validate
+ * @param {Object} user - The authenticated user object from validateSimpleAuth()
+ * @param {string} accessToken - Dataverse access token
+ * @param {string} [userEmailFromRequest] - Optional: User email from request body/query if not in JWT
+ * @returns {Promise<Object>} - Contact record if ownership validated
+ * @throws {Error} - If validation fails or contact doesn't belong to user
+ */
+export async function validateContactOwnership(contactGuid, user, accessToken, userEmailFromRequest = null) {
+    const { DATAVERSE_URL } = process.env
+    
+    if (!DATAVERSE_URL) {
+        throw new Error('DATAVERSE_URL environment variable not configured')
+    }
+    
+    // Validate and sanitize the GUID first
+    const sanitizedGuid = sanitizeGuid(contactGuid, 'Contact GUID')
+    
+    console.log(`🔒 OWNERSHIP VALIDATION: Checking contact ${sanitizedGuid} for user ${user.userId}`)
+    
+    // Fetch the contact record from Dataverse
+    const contactUrl = `${DATAVERSE_URL}/api/data/v9.0/contacts(${sanitizedGuid})?$select=contactid,emailaddress1,cp_portaladmin,_parentcustomerid_value`
+    
+    const response = await fetch(contactUrl, {
+        method: 'GET',
+        headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'OData-MaxVersion': '4.0',
+            'OData-Version': '4.0',
+            'Accept': 'application/json',
+        },
+    })
+    
+    if (!response.ok) {
+        if (response.status === 404) {
+            console.error(`🛡️ OWNERSHIP VIOLATION: Contact GUID ${sanitizedGuid} does not exist`)
+            throw new Error('Contact record not found')
+        }
+        console.error(`🛡️ OWNERSHIP VALIDATION ERROR: Failed to fetch contact: ${response.status}`)
+        throw new Error('Failed to validate contact ownership')
+    }
+    
+    const contact = await response.json()
+    
+    // CRITICAL SECURITY CHECK: Verify the contact's email matches the authenticated user's email
+    // Priority: JWT email > Request email parameter
+    const userEmail = user.userEmail || userEmailFromRequest
+    
+    if (userEmail) {
+        const contactEmail = contact.emailaddress1?.toLowerCase()
+        const normalizedUserEmail = userEmail.toLowerCase()
+        
+        if (!contactEmail) {
+            console.error(`🛡️ OWNERSHIP VIOLATION: Contact ${sanitizedGuid} has no email address`)
+            throw new Error('Contact record has no email address')
+        }
+        
+        if (contactEmail !== normalizedUserEmail) {
+            console.error(`🛡️ OWNERSHIP VIOLATION: Contact ${sanitizedGuid} email "${contactEmail}" does not match user email "${normalizedUserEmail}"`)
+            throw new Error('Access denied: Contact does not belong to authenticated user')
+        }
+        
+        console.log(`✅ OWNERSHIP VALIDATED: Contact ${sanitizedGuid} belongs to ${normalizedUserEmail}`)
+    } else {
+        // If we don't have email at all, this is a security gap - reject the request
+        console.error(`🛡️ OWNERSHIP VALIDATION FAILED: No email available for ownership verification`)
+        throw new Error('Unable to verify contact ownership: email required')
+    }
+    
+    return contact
+}
