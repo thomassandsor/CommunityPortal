@@ -434,6 +434,7 @@ function DynamicSidebar() {
                                     avatarBox: "w-8 h-8"
                                 }
                             }}
+                            afterSignOutUrl={window.location.origin}
                         />
                     </div>
                     {!isCollapsed && (
