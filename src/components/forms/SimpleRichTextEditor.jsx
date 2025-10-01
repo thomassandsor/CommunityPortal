@@ -1,4 +1,26 @@
 import { useState, useRef, useEffect } from 'react'
+import DOMPurify from 'dompurify'
+
+// 🔒 SECURITY: Configure DOMPurify with strict allowlist
+const ALLOWED_TAGS = ['p', 'br', 'strong', 'em', 'u', 's', 'ul', 'ol', 'li', 'span', 'div', 'h1', 'h2', 'h3']
+const ALLOWED_ATTR = ['style'] // Only allow style attribute for formatting
+
+// Configure DOMPurify once
+const sanitizeConfig = {
+    ALLOWED_TAGS,
+    ALLOWED_ATTR,
+    ALLOW_DATA_ATTR: false, // Block data-* attributes
+    KEEP_CONTENT: true, // Keep text content even if tags are removed
+}
+
+/**
+ * 🔒 SECURITY: Sanitize HTML content using DOMPurify
+ * Removes all potentially dangerous tags and attributes while preserving safe formatting
+ */
+const sanitizeHTML = (html) => {
+    if (!html) return ''
+    return DOMPurify.sanitize(html, sanitizeConfig)
+}
 
 function SimpleRichTextEditor({ 
     value, 
@@ -16,9 +38,11 @@ function SimpleRichTextEditor({
     // Sync external value changes
     useEffect(() => {
         if (value !== localContent && !isEditing) {
-            setLocalContent(value || '')
+            // 🔒 SECURITY: Sanitize incoming value from Dataverse
+            const sanitized = sanitizeHTML(value || '')
+            setLocalContent(sanitized)
             if (editorRef.current) {
-                editorRef.current.innerHTML = value || ''
+                editorRef.current.innerHTML = sanitized
             }
         }
     }, [value, isEditing]) // Removed localContent from dependency array
@@ -27,8 +51,10 @@ function SimpleRichTextEditor({
     useEffect(() => {
         if (editorRef.current && value) {
             console.log('🔍 Initial Dataverse HTML structure:', value)
-            editorRef.current.innerHTML = value
-            setLocalContent(value)
+            // 🔒 SECURITY: Sanitize initial value
+            const sanitized = sanitizeHTML(value)
+            editorRef.current.innerHTML = sanitized
+            setLocalContent(sanitized)
         }
     }, []) // Run only once on mount
 
@@ -100,6 +126,9 @@ function SimpleRichTextEditor({
             
             // Convert standard browser list format to Dataverse format
             content = convertToDataverseListFormat(content)
+            
+            // 🔒 SECURITY: Sanitize content before saving
+            content = sanitizeHTML(content)
             
             // Debug list structures
             const lists = editorRef.current.querySelectorAll('ul, ol')
@@ -180,6 +209,10 @@ function SimpleRichTextEditor({
         if (editorRef.current) {
             let finalContent = editorRef.current.innerHTML
             finalContent = convertToDataverseListFormat(finalContent)
+            
+            // 🔒 SECURITY: Final sanitization before saving to Dataverse
+            finalContent = sanitizeHTML(finalContent)
+            
             console.log('🎯 Final content on blur (saving to Dataverse):', finalContent)
             console.log('🎯 First 200 characters:', finalContent.substring(0, 200))
             console.log('🎯 Content starts with <p tag?', finalContent.startsWith('<p'))

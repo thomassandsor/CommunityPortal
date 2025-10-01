@@ -1,40 +1,58 @@
 import { useState, useEffect } from 'react'
-import { useUser } from '@clerk/clerk-react'
+import { useUser, useAuth } from '@clerk/clerk-react'
 import { useNavigate } from 'react-router-dom'
-import { useContact } from '../../hooks/useContact'
+import { useContactContext } from '../../contexts/ContactContext.jsx'
 import ContactForm from '../../components/forms/ContactForm'
 import DynamicSidebar from '../../components/shared/DynamicSidebar'
 
 function ContactEdit() {
     const { user, isLoaded } = useUser()
+    const { getToken } = useAuth()
     const navigate = useNavigate()
-    const { contact, loading, error, fetchContactByEmail, saveContact, clearError } = useContact()
+    const { contact, loading, refreshContact } = useContactContext()
+    const [error, setError] = useState(null)
     const [isEditing, setIsEditing] = useState(false)
     const [showSuccessMessage, setShowSuccessMessage] = useState(false)
 
-    // Fetch contact data when component mounts
-    useEffect(() => {
-        if (isLoaded && user?.primaryEmailAddress?.emailAddress) {
-            fetchContactByEmail(user.primaryEmailAddress.emailAddress)
-        }
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isLoaded, user])
-
-    // Determine if we should be in edit mode
+    // Contact auto-loads from ContactProvider - no manual fetch needed
+    // Just determine if we should be in edit mode
     useEffect(() => {
         if (contact) {
             // If contact exists but has minimal info, enable edit mode
             const hasMinimalInfo = !contact.firstname || !contact.lastname || !contact.mobilephone
             setIsEditing(hasMinimalInfo)
-        } else {
+        } else if (isLoaded) {
             // No contact found, will be created when saving
             setIsEditing(true)
         }
-    }, [contact])
+    }, [contact, isLoaded])
 
     const handleSaveContact = async (contactData) => {
         try {
-            await saveContact(contactData)
+            setError(null)
+            const token = await getToken()
+            
+            // Call the contact API to save
+            const response = await fetch('/.netlify/functions/contact', {
+                method: 'POST',
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify(contactData),
+            })
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => ({}))
+                throw new Error(errorData.error || `Failed to save contact: ${response.statusText}`)
+            }
+
+            const data = await response.json()
+            console.log('Contact saved successfully:', data.contact.contactid)
+            
+            // Refresh contact in context
+            await refreshContact()
+            
             setIsEditing(false)
             
             // Show success message instead of redirecting
@@ -47,12 +65,13 @@ function ContactEdit() {
             
         } catch (err) {
             console.error('Error saving contact:', err)
+            setError(err.message)
             alert(`Error saving contact: ${err.message}`)
         }
     }
 
     const handleToggleEdit = () => {
-        if (error) clearError()
+        if (error) setError(null)
         if (showSuccessMessage) setShowSuccessMessage(false)
         setIsEditing(!isEditing)
     }

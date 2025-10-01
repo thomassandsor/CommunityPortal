@@ -2,14 +2,14 @@ import { useState, useEffect } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
 import { useUser, useAuth } from '@clerk/clerk-react'
 import DynamicSidebar from '../../components/shared/DynamicSidebar'
-import { useContact } from '../../hooks/useContact'
+import { useContactContext } from '../../contexts/ContactContext.jsx'
 
 function EntityList() {
     const { entityName } = useParams()
     const navigate = useNavigate()
     const { user, isLoaded } = useUser()
     const { getToken } = useAuth()
-    const { getCurrentUserContactGuid } = useContact()
+    const { getContactGuid } = useContactContext()
     
     const [entities, setEntities] = useState([])
     const [entityConfig, setEntityConfig] = useState(null)
@@ -40,8 +40,8 @@ function EntityList() {
             const token = await getToken()
             console.log(`🔥 FRONTEND: Got token: ${token ? 'YES' : 'NO'}`)
             
-            // SECURITY: Get Contact GUID for maximum security
-            const contactGuid = getCurrentUserContactGuid()
+            // SECURITY: Get Contact GUID from secure context (no sessionStorage)
+            const contactGuid = getContactGuid()
             console.log(`🛡️ FRONTEND: Contact GUID: ${contactGuid ? 'YES' : 'NO'}`)
             
             if (!contactGuid) {

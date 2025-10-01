@@ -1,8 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useUser, useAuth } from '@clerk/clerk-react'
-import { useContact } from '../../hooks/useContact'
-import { getCurrentUserContactGuid, getCurrentUserContact, getCurrentUserDisplayName } from '../../utils/contactUtils'
+import { useContactContext } from '../../contexts/ContactContext.jsx'
 import DynamicSidebar from '../../components/shared/DynamicSidebar'
 import SimpleRichTextEditor from '../../components/forms/SimpleRichTextEditor'
 import SimpleRichTextViewer from '../../components/forms/SimpleRichTextViewer'
@@ -15,23 +14,8 @@ function EntityEdit() {
     const { user } = useUser()
     const { getToken } = useAuth()
     
-    // Get current user's contact information
-    const { contact: userContact, fetchContactByEmail } = useContact()
-    
-    // Fetch user contact when component mounts
-    useEffect(() => {
-        if (user?.primaryEmailAddress?.emailAddress && !userContact) {
-            console.log('🚨 FETCHING USER CONTACT for:', user.primaryEmailAddress.emailAddress)
-            fetchContactByEmail(user.primaryEmailAddress.emailAddress)
-        } else {
-            console.log('🚨 CONTACT FETCH SKIPPED:', {
-                hasEmail: !!user?.primaryEmailAddress?.emailAddress,
-                email: user?.primaryEmailAddress?.emailAddress,
-                hasContact: !!userContact,
-                contact: userContact
-            })
-        }
-    }, [user?.primaryEmailAddress?.emailAddress, userContact])
+    // SECURITY: Get current user's contact from secure context (no sessionStorage)
+    const { contact: userContact, getContactGuid, getAccountGuid, getDisplayName } = useContactContext()
     
     const [entity, setEntity] = useState(null)
     const [entityConfig, setEntityConfig] = useState(null)
@@ -118,10 +102,10 @@ function EntityEdit() {
         }
     }, [user, entityName, entityId, dataInitialized, isCreateMode, modeInitialized, selectedEntity])
 
-    // CRITICAL: Re-initialize form data when user contact becomes available in storage
+    // CRITICAL: Re-initialize form data when user contact becomes available in context
     useEffect(() => {
-        const currentContactGuid = getCurrentUserContactGuid()
-        const currentContact = getCurrentUserContact()
+        const currentContactGuid = getContactGuid()
+        const currentContact = userContact
         
         if (currentContactGuid && isCreateMode && dataInitialized && formMetadata) {
             console.log('🚨 STORED USER CONTACT AVAILABLE - Re-initializing form data')
@@ -166,8 +150,8 @@ function EntityEdit() {
         try {
             const token = await getToken()
             
-            // SECURITY: Get Contact GUID for secure data access
-            const contactGuid = getCurrentUserContactGuid()
+            // SECURITY: Get Contact GUID from secure context for data access
+            const contactGuid = getContactGuid()
             if (!contactGuid) {
                 throw new Error('Contact GUID required for secure data access')
             }
@@ -201,8 +185,8 @@ function EntityEdit() {
         try {
             const token = await getToken()
             
-            // SECURITY: Get Contact GUID for secure data access
-            const contactGuid = getCurrentUserContactGuid()
+            // SECURITY: Get Contact GUID from secure context for data access
+            const contactGuid = getContactGuid()
             if (!contactGuid) {
                 throw new Error('Contact GUID required for secure data access')
             }
@@ -246,8 +230,8 @@ function EntityEdit() {
             console.log('🆕 Initializing form for create mode')
             console.log('🆕 User contact available:', userContact ? 'YES' : 'NO', userContact)
             console.log('🆕 🚨 CRITICAL DEBUG - Stored contact details:')
-            const storedContact = getCurrentUserContact()
-            const storedGuid = getCurrentUserContactGuid()
+            const storedContact = userContact
+            const storedGuid = getContactGuid()
             console.log('🆕 🚨 storedContact object:', JSON.stringify(storedContact, null, 2))
             console.log('🆕 🚨 storedContact GUID:', storedGuid)
             console.log('🆕 🚨 typeof storedContact GUID:', typeof storedGuid)
@@ -267,8 +251,8 @@ function EntityEdit() {
                     }
                     
                     // Auto-populate contact fields with current user's contact
-                    const currentContactGuid = getCurrentUserContactGuid()
-                    const currentContact = getCurrentUserContact()
+                    const currentContactGuid = getContactGuid()
+                    const currentContact = userContact
                     
                     if (isContactField(fieldName) && currentContactGuid) {
                         // Use the original field name - conversion will happen during rendering
@@ -340,7 +324,9 @@ function EntityEdit() {
             'timezoneruleversionnumber',
             'utcconversiontimezonecode',
             'importsequencenumber',
-            'overriddencreatedon'
+            'overriddencreatedon',
+            'fullname',  // Computed field (firstname + lastname)
+            'yominame',  // Computed field (phonetic name)
         ]
         
         // Also check for entity-specific ID fields (dynamic based on entity name)
@@ -416,6 +402,16 @@ function EntityEdit() {
             console.log(`🔍 Full form data before filtering:`, formData)
             const saveData = {}
             Object.entries(formData).forEach(([key, value]) => {
+                // Skip navigation property objects (e.g., cp_Contact, cp_Organization)
+                // These are read-only expanded entities from Dataverse
+                if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+                    // Check if it's a navigation property (has contactid, accountid, etc.)
+                    if (value.contactid || value.accountid || value.organizationid) {
+                        console.log(`⚠️ SKIPPING navigation property object: ${key}`)
+                        return
+                    }
+                }
+                
                 if (!isSystemField(key)) {
                     // Handle contact fields - only include the proper _value fields
                     if (isContactField(key)) {
@@ -467,8 +463,8 @@ function EntityEdit() {
                 }
             })
 
-            // SECURITY: Include Contact GUID in request body for maximum security
-            const contactGuid = getCurrentUserContactGuid()
+            // SECURITY: Get Contact GUID from secure context for save operation
+            const contactGuid = getContactGuid()
             if (!contactGuid) {
                 throw new Error('Contact GUID required for secure save operation')
             }
@@ -703,7 +699,7 @@ function EntityEdit() {
 
             case 'lookup':
                 const lookupDisplayValue = getLookupDisplayValue(field.datafieldname, value, formData)
-                const isAutoPopulatedContact = isContactField(field.datafieldname) && isCreateMode && getCurrentUserContactGuid()
+                const isAutoPopulatedContact = isContactField(field.datafieldname) && isCreateMode && getContactGuid()
                 
                 return (
                     <div className="relative">
@@ -830,7 +826,7 @@ function EntityEdit() {
 
         // Special handling for auto-populated contact fields in create mode
         if (isCreateMode && isContactField(fieldName)) {
-            const currentContact = getCurrentUserContact()
+            const currentContact = userContact
             if (currentContact) {
                 // Always show the user's name for contact fields in create mode, regardless of value
                 return currentContact.fullname || `${currentContact.firstname} ${currentContact.lastname}` || currentContact.emailaddress1 || 'Your Contact'

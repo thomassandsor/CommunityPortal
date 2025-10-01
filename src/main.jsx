@@ -2,6 +2,7 @@ import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { ClerkProvider } from '@clerk/clerk-react'
 import { BrowserRouter } from 'react-router-dom'
+import { ContactProvider } from './contexts/ContactContext.jsx'
 import App from './App.jsx'
 import './index.css'
 
@@ -43,7 +44,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
                 allowedRedirectOrigins={[window.location.origin]}
             >
                 <BrowserRouter future={routerFutureFlags}>
-                    <App />
+                    <ContactProvider>
+                        <App />
+                    </ContactProvider>
                 </BrowserRouter>
             </ClerkProvider>
         </React.StrictMode>
@@ -61,7 +64,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
             allowedRedirectOrigins={[window.location.origin]}
         >
             <BrowserRouter future={routerFutureFlags}>
-                <App />
+                <ContactProvider>
+                    <App />
+                </ContactProvider>
             </BrowserRouter>
         </ClerkProvider>
     )

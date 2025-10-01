@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useUser, useAuth } from '@clerk/clerk-react'
 import { useNavigate, useLocation } from 'react-router-dom'
+import { useContactContext } from '../../contexts/ContactContext.jsx'
 
 /**
  * ContactChecker Component
@@ -10,6 +11,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
  * 2. In 'create' mode: Auto-creates contact if none exists (for OAuth flows)
  * 3. In 'validate' mode: Rejects access if contact doesn't exist (for email verification flows)
  * 4. Syncs Clerk profile with Dataverse contact data when possible
+ * 5. Integrates with ContactProvider for secure contact storage (no sessionStorage)
  * 
  * @param {string} mode - 'create' (default) or 'validate'
  */
@@ -18,6 +20,7 @@ function ContactChecker({ children, mode = 'create' }) {
     const { getToken } = useAuth()
     const navigate = useNavigate()
     const location = useLocation()
+    const { contact, loading: contextLoading } = useContactContext()
     const [isChecking, setIsChecking] = useState(true)
     const [hasChecked, setHasChecked] = useState(false)
     const [validationError, setValidationError] = useState('')
@@ -39,19 +42,9 @@ function ContactChecker({ children, mode = 'create' }) {
 
     useEffect(() => {
         // Only run check once when user is loaded and we haven't checked yet
+        // SECURITY: ContactProvider handles the actual contact fetching automatically
+        // This component now just provides validation logic and redirect handling
         if (isLoaded && user && !hasChecked) {
-            // Check if we've already processed this user in this session (only for create mode)
-            const sessionKey = `contact_checked_${user.id}`
-            const alreadyChecked = sessionStorage.getItem(sessionKey)
-
-            // In validate mode, always check fresh (don't use session cache)
-            if (alreadyChecked && mode === 'create') {
-                console.log('Already checked in session, skipping (create mode)')
-                setIsChecking(false)
-                setHasChecked(true)
-                return
-            }
-
             if (mode === 'validate') {
                 console.log('🔄 VALIDATE MODE: Forcing fresh contact lookup')
             }
@@ -60,7 +53,7 @@ function ContactChecker({ children, mode = 'create' }) {
             checkAndCreateContact()
         }
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [isLoaded, user, hasChecked, mode])
+    }, [isLoaded, user, hasChecked, mode, contact])
 
     const checkAndCreateContact = async () => {
         try {
@@ -74,10 +67,16 @@ function ContactChecker({ children, mode = 'create' }) {
                 return
             }
 
-            // Mark as checked in session storage to prevent multiple attempts (only in create mode)
-            const sessionKey = `contact_checked_${user.id}`
-            if (mode === 'create') {
-                sessionStorage.setItem(sessionKey, 'true')
+            // SECURITY ENHANCEMENT: ContactProvider automatically fetches contact
+            // If contact exists in context, we can skip the API call (unless in validate mode)
+            if (contact && mode === 'create') {
+                console.log('Contact already loaded by ContactProvider:', contact.contactid)
+                setIsChecking(false)
+                setHasChecked(true)
+                if (location.pathname === '/' || location.pathname === '/welcome') {
+                    navigate('/welcome')
+                }
+                return
             }
 
             console.log('Checking contact for email:', email)
@@ -96,15 +95,15 @@ function ContactChecker({ children, mode = 'create' }) {
                 console.log('Existing contact found:', checkData.contact.contactid)
                 
                 // Smart Profile Sync - Update Clerk profile with Dataverse contact data
-                const contact = checkData.contact
+                const existingContact = checkData.contact
                 
                 // Check if profile sync should be attempted based on mode
                 if (mode === 'validate') {
                     console.log('🔍 VALIDATE MODE: Testing if Clerk profile updates are possible after email verification...')
-                    await syncClerkProfile(contact)
+                    await syncClerkProfile(existingContact)
                 } else {
                     console.log('🔍 CREATE MODE: Attempting Clerk profile sync for OAuth user...')
-                    await syncClerkProfile(contact)
+                    await syncClerkProfile(existingContact)
                 }
                 
                 setIsChecking(false)
@@ -136,6 +135,9 @@ function ContactChecker({ children, mode = 'create' }) {
 
                 const createData = await createResponse.json()
                 console.log('Contact created successfully:', createData.contact.contactid)
+
+                // SECURITY: ContactProvider will automatically refetch on next render
+                // No need to manually update sessionStorage (removed for XSS protection)
 
                 // Redirect to profile page to complete information
                 navigate('/contacts/edit')

@@ -21,6 +21,122 @@
 import { validateSimpleAuth, createAuthErrorResponse, createSuccessResponse, buildSecureEmailFilter, sanitizeGuid, isValidGuid, validateContactOwnership, getSecureCorsHeaders, checkRateLimit, createRateLimitResponse, createSafeErrorResponse, fetchWithTimeout } from './auth-utils.js'
 import { logDebug, logError, logWarn } from './logger.js'
 
+// 🔒 SECURITY: System fields that MUST NOT be modified by client requests
+// These fields are managed by Dataverse internally or through admin operations only
+const BLOCKED_SYSTEM_FIELDS = [
+    'createdon',           // Created date - system managed
+    'modifiedon',          // Modified date - system managed
+    'createdby',           // Creator - system managed
+    'modifiedby',          // Modifier - system managed
+    '_createdby_value',    // Creator lookup - system managed
+    '_modifiedby_value',   // Modifier lookup - system managed
+    '_ownerid_value',      // Owner - controlled via contact relation
+    'ownerid',             // Owner - controlled via contact relation
+    'statecode',           // State (active/inactive) - controlled via API
+    'statuscode',          // Status reason - controlled via API
+    'versionnumber',       // Version - system managed
+    'importsequencenumber', // Import tracking - system managed
+    'overriddencreatedon', // Historical import field - system managed
+    'timezoneruleversionnumber', // Timezone - system managed
+    'utcconversiontimezonecode', // Timezone - system managed
+    'fullname',            // Computed field (firstname + lastname) - read-only
+    'yominame',            // Computed field (phonetic name) - read-only
+]
+
+/**
+ * 🔒 SECURITY: Validate incoming fields against entity form metadata
+ * Prevents unauthorized field manipulation by ensuring only form-visible fields are accepted
+ * 
+ * @param {Object} data - Incoming data from client
+ * @param {Object} formMetadata - Entity form metadata with allowed fields
+ * @param {string} entityLogicalName - Entity name for error messages
+ * @returns {Object} { valid: boolean, blockedFields: string[], message: string }
+ */
+function validateFieldSecurity(data, formMetadata, entityLogicalName) {
+    const incomingFields = Object.keys(data)
+    const blockedFields = []
+    const unauthorizedFields = []
+    
+    // Extract all allowed field names from form metadata
+    const allowedFields = new Set()
+    if (formMetadata?.structure?.tabs) {
+        formMetadata.structure.tabs.forEach(tab => {
+            if (tab.sections) {
+                tab.sections.forEach(section => {
+                    if (section.rows) {
+                        section.rows.forEach(row => {
+                            if (row.cells) {
+                                row.cells.forEach(cell => {
+                                    if (cell.controls) {
+                                        cell.controls.forEach(control => {
+                                            if (control.datafieldname && control.type === 'control') {
+                                                allowedFields.add(control.datafieldname.toLowerCase())
+                                                // Also allow the lookup field variant (_fieldname_value)
+                                                allowedFields.add(`_${control.datafieldname}_value`.toLowerCase())
+                                            }
+                                        })
+                                    }
+                                })
+                            }
+                        })
+                    }
+                })
+            }
+        })
+    }
+    
+    logDebug(`🔒 Field Security Check for ${entityLogicalName}:`)
+    logDebug(`🔒   Allowed fields: ${allowedFields.size}`)
+    logDebug(`🔒   Incoming fields: ${incomingFields.length}`)
+    
+    // Fields that are legitimate metadata and should be exempted from validation
+    const METADATA_FIELDS = ['@odata.etag', 'contactguid', 'contactGuid']
+    
+    // Check each incoming field
+    for (const fieldName of incomingFields) {
+        const fieldLower = fieldName.toLowerCase()
+        
+        // Skip metadata fields (legitimate API fields)
+        if (METADATA_FIELDS.includes(fieldLower)) {
+            logDebug(`✅ Allowing metadata field: ${fieldName}`)
+            continue
+        }
+        
+        // Check if it's a blocked system field
+        if (BLOCKED_SYSTEM_FIELDS.includes(fieldLower)) {
+            blockedFields.push(fieldName)
+            logWarn(`⚠️ SECURITY VIOLATION: Attempted to modify blocked system field: ${fieldName}`)
+            continue
+        }
+        
+        // Check if field is in the form metadata (skip @odata.bind fields as they're conversions)
+        if (!fieldName.includes('@odata.bind') && !allowedFields.has(fieldLower)) {
+            unauthorizedFields.push(fieldName)
+            logWarn(`⚠️ SECURITY VIOLATION: Attempted to modify unauthorized field: ${fieldName}`)
+        }
+    }
+    
+    if (blockedFields.length > 0 || unauthorizedFields.length > 0) {
+        const violations = []
+        if (blockedFields.length > 0) {
+            violations.push(`Blocked system fields: ${blockedFields.join(', ')}`)
+        }
+        if (unauthorizedFields.length > 0) {
+            violations.push(`Unauthorized fields: ${unauthorizedFields.join(', ')}`)
+        }
+        
+        return {
+            valid: false,
+            blockedFields,
+            unauthorizedFields,
+            message: `Field security violation detected. ${violations.join('. ')}. Only form-visible fields can be modified.`
+        }
+    }
+    
+    logDebug(`✅ Field security validation passed`)
+    return { valid: true, blockedFields: [], unauthorizedFields: [], message: '' }
+}
+
 export const handler = async (event) => {
     // Get origin for CORS
     const origin = event.headers?.origin || event.headers?.Origin || null
@@ -558,6 +674,13 @@ async function handleCreateRequest(accessToken, entityConfig, userContact, reque
     
     logDebug(`✅ Form metadata loaded for CREATE: ${formMetadata.name}`)
     
+    // 🔒 SECURITY: Validate field security before processing
+    const fieldValidation = validateFieldSecurity(data, formMetadata, entityConfig.entityLogicalName)
+    if (!fieldValidation.valid) {
+        logError(`🚨 SECURITY VIOLATION in CREATE: ${fieldValidation.message}`)
+        throw new Error(fieldValidation.message)
+    }
+    
     // Sanitize rich text fields for Dataverse compatibility with form metadata
     const sanitizedData = sanitizeDataForDataverse(data, entityConfig, formMetadata)
     
@@ -899,6 +1022,13 @@ async function handleUpdateRequest(accessToken, entityConfig, userContact, entit
     }
     
     logDebug(`✅ Form metadata loaded: ${formMetadata.name}`)
+    
+    // 🔒 SECURITY: Validate field security before processing
+    const fieldValidation = validateFieldSecurity(data, formMetadata, entityConfig.entityLogicalName)
+    if (!fieldValidation.valid) {
+        logError(`🚨 SECURITY VIOLATION in UPDATE: ${fieldValidation.message}`)
+        throw new Error(fieldValidation.message)
+    }
     
     // Sanitize data based on form metadata
     const sanitizedData = sanitizeDataForDataverse(data, entityConfig, formMetadata)
