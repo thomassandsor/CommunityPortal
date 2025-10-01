@@ -687,7 +687,10 @@ async function handleCreateRequest(accessToken, entityConfig, userContact, reque
     // SECURITY: Always set user ownership - contact GUID is guaranteed at this point
     if (entityConfig.contactRelationField) {
         // Standard user entity - set contact ownership
-        const contactBindField = `${entityConfig.contactRelationField}@odata.bind`
+        // CRITICAL: Use navigation property (cp_Contact) not field name (cp_contact)
+        const contactLookupField = `_${entityConfig.contactRelationField}_value`
+        const navigationProperty = getNavigationPropertyForLookupField(contactLookupField, entityConfig)
+        const contactBindField = `${navigationProperty}@odata.bind`
         sanitizedData[contactBindField] = `/contacts(${userContact.contactid})`
         logDebug(`🛡️ SECURITY: User ownership set - ${contactBindField} = /contacts(${userContact.contactid})`)
     } else if (!userContact.cp_portaladmin) {

@@ -280,6 +280,9 @@ function normalizeEntityConfig(rawConfig) {
         viewSubgridGuid: rawConfig.cp_viewsubgridguid,
         contactRelationField: rawConfig.cp_contactrelationfield,
         accountRelationField: rawConfig.cp_accountrelationfield,
+        // BACKWARD COMPATIBILITY: Keep original field names for frontend access
+        cp_contactrelationfield: rawConfig.cp_contactrelationfield,
+        cp_accountrelationfield: rawConfig.cp_accountrelationfield,
         showInMenu: rawConfig.cp_showinmenu,
         menuIcon: rawConfig.cp_menuicon,
         menuOrder: rawConfig.cp_menuorder,

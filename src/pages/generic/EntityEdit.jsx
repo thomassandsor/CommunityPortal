@@ -83,11 +83,17 @@ function EntityEdit() {
                 promises.push(fetchEntity())
             }
             
-            Promise.all(promises).then(([formMetadata, entityData]) => {
+            Promise.all(promises).then(([formResult, entityData]) => {
+                // formResult contains both formMetadata and entityConfig
+                const formMetadata = formResult.formMetadata
+                const formEntityConfig = formResult.entityConfig
+                
                 // Initialize form data immediately with both results
                 // For edit mode, prefer fresh data or use cached selectedEntity
                 const dataToUse = entityData || selectedEntity
-                initializeFormData(dataToUse, formMetadata)
+                
+                // CRITICAL: Pass entityConfig to initializeFormData
+                initializeFormData(dataToUse, formMetadata, formEntityConfig)
                 
                 // Set edit mode: create mode = editing, edit mode = view first
                 setIsEditing(isCreateMode)
@@ -107,9 +113,13 @@ function EntityEdit() {
         const currentContactGuid = getContactGuid()
         const currentContact = userContact
         
-        if (currentContactGuid && isCreateMode && dataInitialized && formMetadata) {
+        if (currentContactGuid && isCreateMode && dataInitialized && formMetadata && entityConfig) {
             console.log('🚨 STORED USER CONTACT AVAILABLE - Re-initializing form data')
             console.log('🚨 Stored contact GUID:', currentContactGuid)
+            console.log('🚨 Entity config available:', {
+                hasConfig: !!entityConfig,
+                contactRelationField: entityConfig?.contactRelationField || entityConfig?.cp_contactrelationfield
+            })
             
             // Re-initialize form data with the stored contact
             setFormData(prev => {
@@ -118,18 +128,26 @@ function EntityEdit() {
                 // Find contact fields and populate them
                 if (formMetadata?.structure?.tabs) {
                     const fields = extractFieldsFromStructure(formMetadata.structure.tabs)
+                    const contactRelationField = entityConfig?.contactRelationField || entityConfig?.cp_contactrelationfield
+                    
                     fields.forEach(field => {
-                        if (isContactField(field.datafieldname)) {
-                            // Use the configured contact relation field name instead of hardcoded 'cp_contact'
-                            const contactRelationField = entityConfig?.cp_contactrelationfield
+                        if (isContactField(field.datafieldname, entityConfig)) {
+                            console.log(`🚨 Processing contact field: ${field.datafieldname}`)
+                            
+                            // Use the same logic as initializeFormData
                             if (field.datafieldname === contactRelationField) {
-                                // Populate BOTH form field name and lookup field name
-                                updated[contactRelationField] = currentContactGuid
-                                updated[`_${contactRelationField}_value`] = currentContactGuid
-                                console.log('🚨 RE-POPULATED contact fields with stored GUID:', contactRelationField, currentContactGuid)
-                            } else {
+                                // Form shows "cp_contact" but we need to populate "_cp_contact_value"
+                                const lookupFieldName = `_${contactRelationField}_value`
+                                updated[lookupFieldName] = currentContactGuid
+                                console.log(`🚨 RE-POPULATED contact lookup field: ${lookupFieldName} = ${currentContactGuid}`)
+                            } else if (field.datafieldname.endsWith('_value')) {
+                                // Already in lookup format
                                 updated[field.datafieldname] = currentContactGuid
-                                console.log('🚨 RE-POPULATED other contact field:', field.datafieldname, currentContactGuid)
+                                console.log(`🚨 RE-POPULATED lookup field: ${field.datafieldname} = ${currentContactGuid}`)
+                            } else {
+                                // Other contact-related fields
+                                updated[field.datafieldname] = currentContactGuid
+                                console.log(`🚨 RE-POPULATED contact field: ${field.datafieldname} = ${currentContactGuid}`)
                             }
                         }
                     })
@@ -139,7 +157,7 @@ function EntityEdit() {
                 return updated
             })
         }
-    }, [isCreateMode, dataInitialized, formMetadata]) // Removed userContact dependency - now using stored data
+    }, [isCreateMode, dataInitialized, formMetadata, entityConfig]) // Added entityConfig dependency
 
     const fetchEntity = async () => {
         if (!entityId) {
@@ -208,7 +226,13 @@ function EntityEdit() {
             setEntityConfig(data.entityConfig)
             
             console.log(`✅ Loaded form metadata for ${entityName}:`, data.formMetadata)
-            return data.formMetadata
+            console.log(`✅ Loaded entity config for ${entityName}:`, data.entityConfig)
+            
+            // Return BOTH so they can be used together before state updates
+            return {
+                formMetadata: data.formMetadata,
+                entityConfig: data.entityConfig
+            }
 
         } catch (err) {
             console.error(`Error fetching form metadata for ${entityName}:`, err)
@@ -216,8 +240,17 @@ function EntityEdit() {
         }
     }
 
-    const initializeFormData = (entityData, formMetadata) => {
+    const initializeFormData = (entityData, formMetadata, passedEntityConfig = null) => {
         const initialData = {}
+        
+        // Use passed entityConfig if available, otherwise fall back to state
+        const configToUse = passedEntityConfig || entityConfig
+        
+        console.log('🎯 initializeFormData called with config:', {
+            hasPassedConfig: !!passedEntityConfig,
+            hasStateConfig: !!entityConfig,
+            contactRelationField: configToUse?.contactRelationField || configToUse?.cp_contactrelationfield
+        })
         
         if (entityData) {
             // Edit mode: populate with existing data
@@ -254,25 +287,41 @@ function EntityEdit() {
                     const currentContactGuid = getContactGuid()
                     const currentContact = userContact
                     
-                    if (isContactField(fieldName) && currentContactGuid) {
+                    if (isContactField(fieldName, configToUse) && currentContactGuid) {
                         // Use the original field name - conversion will happen during rendering
                         // Dynamic contact field handling using entity configuration
-                        const contactRelationField = formMetadata?.entityConfig?.cp_contactrelationfield || entityConfig?.cp_contactrelationfield
+                        const contactRelationField = configToUse?.contactRelationField || configToUse?.cp_contactrelationfield
+                        
+                        console.log(`🎯 CONTACT FIELD DETECTED in initializeFormData:`, {
+                            fieldName,
+                            contactRelationField,
+                            currentContactGuid
+                        })
+                        
+                        // CRITICAL FIX: Handle both form field name (cp_contact) and lookup field name (_cp_contact_value)
                         if (fieldName === contactRelationField) {
-                            // Populate BOTH field names to ensure data is available after field conversion
-                            initialData[contactRelationField] = currentContactGuid
-                            initialData[`_${contactRelationField}_value`] = currentContactGuid
-                            console.log(`👤 🚨 STORED GUID USED: Double-populated ${contactRelationField}=${currentContactGuid} AND _${contactRelationField}_value=${currentContactGuid}`)
+                            // Form shows "cp_contact" but we need to populate "_cp_contact_value"
+                            const lookupFieldName = `_${contactRelationField}_value`
+                            initialData[lookupFieldName] = currentContactGuid
+                            console.log(`👤 🚨 AUTO-POPULATED contact lookup field: ${lookupFieldName} = ${currentContactGuid}`)
+                        } else if (fieldName.endsWith('_value')) {
+                            // Already in lookup format
+                            initialData[fieldName] = currentContactGuid
+                            console.log(`👤 Auto-populated contact lookup field ${fieldName} with stored GUID: ${currentContactGuid}`)
                         } else {
+                            // Other contact-related fields
                             initialData[fieldName] = currentContactGuid
                             console.log(`👤 Auto-populated contact field ${fieldName} with stored GUID: ${currentContactGuid}`)
                         }
-                        console.log(`� Contact GUID type: ${typeof currentContactGuid}`)
+                        console.log(`👤 Contact GUID type: ${typeof currentContactGuid}`)
                         console.log(`👤 Contact info from storage:`, { 
                             contactid: currentContact?.contactid, 
                             fullname: currentContact?.fullname,
                             email: currentContact?.emailaddress1 
                         })
+                        
+                        // CRITICAL: Return early to prevent setting default value
+                        return
                     } else {
                         // Use default value for other fields
                         const defaultValue = getDefaultValue(field)
@@ -282,12 +331,16 @@ function EntityEdit() {
                 })
                 
                 console.log('🆕 Final initialized form data:', initialData)
+                console.log('🆕 Form data keys:', Object.keys(initialData))
+                console.log('🆕 Has _cp_contact_value?', '_cp_contact_value' in initialData)
+                console.log('🆕 _cp_contact_value value:', initialData['_cp_contact_value'])
             } else {
                 console.log('⚠️ No form metadata structure available')
             }
         }
 
         setFormData(initialData)
+        console.log('🆕 setFormData called with:', initialData)
     }
 
     const extractFieldsFromStructure = (tabs) => {
@@ -340,9 +393,11 @@ function EntityEdit() {
     }
 
     // Helper function to identify contact lookup fields (dynamic based on entity config)
-    const isContactField = (fieldName) => {
+    const isContactField = (fieldName, configOverride = null) => {
         // Use the configured contact relation field from entity config
-        const configuredContactField = entityConfig?.cp_contactrelationfield
+        // Try both camelCase and underscore versions for backward compatibility
+        const config = configOverride || entityConfig
+        const configuredContactField = config?.contactRelationField || config?.cp_contactrelationfield
         
         const contactFieldPatterns = [
             '_contactid_value',     // Standard Dataverse contact lookup
@@ -609,12 +664,21 @@ function EntityEdit() {
                 displayValue = formatNorwegianDateTime(value)
             }
             
+            // Special handling for contact lookup fields in create mode
+            if (isCreateMode && isContactField(fieldName) && userContact) {
+                displayValue = userContact.fullname || 
+                             `${userContact.firstname} ${userContact.lastname}` || 
+                             userContact.emailaddress1 || 
+                             'Your Contact'
+                console.log('🎨 RENDERING contact field with user name:', displayValue)
+            }
+            
             return (
-                <div className="bg-gray-50 border-2 border-solid border-gray-300 rounded-lg px-4 py-3 flex items-center min-h-[44px]">
+                <div className={`${isCreateMode && isContactField(fieldName) ? 'bg-blue-50 border-2 border-solid border-blue-300' : 'bg-gray-50 border-2 border-solid border-gray-300'} rounded-lg px-4 py-3 flex items-center min-h-[44px]`}>
                     <svg className="h-4 w-4 text-gray-400 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
                     </svg>
-                    <span className="text-gray-800">{displayValue}</span>
+                    <span className={`${isCreateMode && isContactField(fieldName) ? 'text-blue-700 font-medium' : 'text-gray-800'}`}>{displayValue}</span>
                 </div>
             )
         }
@@ -698,8 +762,29 @@ function EntityEdit() {
                 )
 
             case 'lookup':
-                const lookupDisplayValue = getLookupDisplayValue(field.datafieldname, value, formData)
-                const isAutoPopulatedContact = isContactField(field.datafieldname) && isCreateMode && getContactGuid()
+                // CRITICAL FIX: Determine the actual lookup field name to check for data
+                // Form might show "cp_contact" but data is stored as "_cp_contact_value"
+                const contactRelationField = entityConfig?.contactRelationField || entityConfig?.cp_contactrelationfield
+                let actualLookupFieldName = field.datafieldname
+                
+                // If this is the contact relation field without _value suffix, add it
+                if (contactRelationField && field.datafieldname === contactRelationField) {
+                    actualLookupFieldName = `_${contactRelationField}_value`
+                    console.log(`🔧 LOOKUP FIELD MAPPING: ${field.datafieldname} → ${actualLookupFieldName}`)
+                }
+                
+                // Get the value from the actual lookup field name
+                const actualLookupValue = formData[actualLookupFieldName] || value
+                const lookupDisplayValue = getLookupDisplayValue(actualLookupFieldName, actualLookupValue, formData)
+                const isAutoPopulatedContact = isContactField(actualLookupFieldName) && isCreateMode && getContactGuid()
+                
+                console.log(`🔍 LOOKUP RENDER DEBUG:`, {
+                    formFieldName: field.datafieldname,
+                    actualLookupFieldName,
+                    actualLookupValue,
+                    lookupDisplayValue,
+                    isAutoPopulatedContact
+                })
                 
                 return (
                     <div className="relative">
@@ -821,15 +906,28 @@ function EntityEdit() {
             value,
             hasEntityData: !!entityData,
             entityKeys: entityData ? Object.keys(entityData) : [],
-            configuredContactField: entityConfig?.cp_contactrelationfield
+            configuredContactField: entityConfig?.cp_contactrelationfield,
+            isCreateMode,
+            hasUserContact: !!userContact
         })
 
         // Special handling for auto-populated contact fields in create mode
-        if (isCreateMode && isContactField(fieldName)) {
+        const isContactLookup = isContactField(fieldName)
+        console.log('🔍 FRONTEND: Is contact field?', isContactLookup, 'for field:', fieldName)
+        
+        if (isCreateMode && isContactLookup) {
             const currentContact = userContact
+            console.log('🔍 FRONTEND: Contact data:', currentContact)
+            
             if (currentContact) {
-                // Always show the user's name for contact fields in create mode, regardless of value
-                return currentContact.fullname || `${currentContact.firstname} ${currentContact.lastname}` || currentContact.emailaddress1 || 'Your Contact'
+                const displayName = currentContact.fullname || 
+                                  `${currentContact.firstname} ${currentContact.lastname}` || 
+                                  currentContact.emailaddress1 || 
+                                  'Your Contact'
+                console.log('✅ FRONTEND: Returning user contact name:', displayName)
+                return displayName
+            } else {
+                console.log('⚠️ FRONTEND: No user contact available in context')
             }
         }
         
