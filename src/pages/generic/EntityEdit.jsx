@@ -3,8 +3,20 @@ import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useUser, useAuth } from '@clerk/clerk-react'
 import { useContactContext } from '../../contexts/ContactContext.jsx'
 import DynamicSidebar from '../../components/shared/DynamicSidebar'
-import SimpleRichTextEditor from '../../components/forms/SimpleRichTextEditor'
 import SimpleRichTextViewer from '../../components/forms/SimpleRichTextViewer'
+import { 
+    TextField, 
+    EmailField, 
+    PhoneField, 
+    MultiTextField, 
+    DateTimeField, 
+    BooleanField, 
+    DecimalField, 
+    RichTextField,
+    DisabledFieldDisplay,
+    LookupFieldDisplay,
+    formatNorwegianDateTime
+} from '../../components/forms/shared/FieldRenderer'
 
 function EntityEdit() {
     // Get route parameters and location for mode detection
@@ -614,26 +626,6 @@ function EntityEdit() {
         return result
     }
 
-    // Helper function to format datetime in Norwegian locale consistently
-    const formatNorwegianDateTime = (dateValue) => {
-        if (!dateValue) return ''
-        
-        try {
-            const date = new Date(dateValue)
-            return date.toLocaleString('nb-NO', {
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit',
-                timeZone: 'Europe/Oslo'
-            })
-        } catch (error) {
-            console.error('Error formatting date:', error)
-            return dateValue.toString()
-        }
-    }
-
     const renderField = (field) => {
         const value = formData[field.datafieldname]
         const fieldName = field.datafieldname
@@ -652,10 +644,8 @@ function EntityEdit() {
         if (!isEditing && !isCreateMode) {
             return renderViewField(field, value)
         }
-
-        const baseClassName = "mt-1 block w-full px-3 py-2 bg-white border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500"
         
-        // For disabled fields, use the same styling as view mode for consistency
+        // For disabled fields, use shared DisabledFieldDisplay component
         if (isDisabled) {
             let displayValue = value || 'Not provided'
             
@@ -674,90 +664,83 @@ function EntityEdit() {
             }
             
             return (
-                <div className={`${isCreateMode && isContactField(fieldName) ? 'bg-blue-50 border-2 border-solid border-blue-300' : 'bg-gray-50 border-2 border-solid border-gray-300'} rounded-lg px-4 py-3 flex items-center min-h-[44px]`}>
-                    <svg className="h-4 w-4 text-gray-400 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                    </svg>
-                    <span className={`${isCreateMode && isContactField(fieldName) ? 'text-blue-700 font-medium' : 'text-gray-800'}`}>{displayValue}</span>
-                </div>
+                <DisabledFieldDisplay
+                    value={value}
+                    displayValue={displayValue}
+                    isContactField={isContactField(fieldName)}
+                    isCreateMode={isCreateMode}
+                />
             )
         }
 
+        // Editable fields - use shared field components
+        const placeholder = getFieldDisplayName(field)
+        
         switch (field.controlType) {
             case 'multitext':
                 return (
-                    <textarea
-                        value={value || ''}
-                        onChange={(e) => handleInputChange(field.datafieldname, e.target.value)}
+                    <MultiTextField
+                        value={value}
+                        onChange={handleInputChange}
                         disabled={isDisabled}
-                        className={baseClassName}
+                        placeholder={placeholder}
                         rows={3}
-                        placeholder={getFieldDisplayName(field)}
+                        fieldName={fieldName}
                     />
                 )
 
             case 'boolean':
                 return (
-                    <div className="flex items-center">
-                        <input
-                            type="checkbox"
-                            checked={Boolean(value)}
-                            onChange={(e) => handleInputChange(field.datafieldname, e.target.checked)}
-                            disabled={isDisabled}
-                            className="h-4 w-4 text-blue-600 border-gray-300 rounded focus:ring-blue-500"
-                        />
-                        <label className="ml-2 text-sm text-gray-600">
-                            {getFieldDisplayName(field)}
-                        </label>
-                    </div>
+                    <BooleanField
+                        value={value}
+                        onChange={handleInputChange}
+                        disabled={isDisabled}
+                        label={placeholder}
+                        fieldName={fieldName}
+                    />
                 )
 
             case 'datetime':
                 return (
-                    <input
-                        type="datetime-local"
-                        value={value ? new Date(value).toISOString().slice(0, 16) : ''}
-                        onChange={(e) => handleInputChange(field.datafieldname, e.target.value)}
+                    <DateTimeField
+                        value={value}
+                        onChange={handleInputChange}
                         disabled={isDisabled}
-                        className={baseClassName}
+                        fieldName={fieldName}
                     />
                 )
 
             case 'email':
                 return (
-                    <input
-                        type="email"
-                        value={value || ''}
-                        onChange={(e) => handleInputChange(field.datafieldname, e.target.value)}
+                    <EmailField
+                        value={value}
+                        onChange={handleInputChange}
                         disabled={isDisabled}
-                        className={baseClassName}
-                        placeholder={getFieldDisplayName(field)}
+                        placeholder={placeholder}
+                        fieldName={fieldName}
                     />
                 )
 
             case 'phone':
                 return (
-                    <input
-                        type="tel"
-                        value={value || ''}
-                        onChange={(e) => handleInputChange(field.datafieldname, e.target.value)}
+                    <PhoneField
+                        value={value}
+                        onChange={handleInputChange}
                         disabled={isDisabled}
-                        className={baseClassName}
-                        placeholder={getFieldDisplayName(field)}
+                        placeholder={placeholder}
+                        fieldName={fieldName}
                     />
                 )
 
             case 'decimal':
             case 'money':
                 return (
-                    <input
-                        type="number"
-                        step="0.01"
-                        value={value || ''}
-                        onChange={(e) => handleInputChange(field.datafieldname, parseFloat(e.target.value) || 0)}
+                    <DecimalField
+                        value={value}
+                        onChange={handleInputChange}
                         disabled={isDisabled}
-                        className={baseClassName}
-                        placeholder={getFieldDisplayName(field)}
+                        placeholder={placeholder}
+                        fieldName={fieldName}
                     />
                 )
 
@@ -787,37 +770,31 @@ function EntityEdit() {
                 })
                 
                 return (
-                    <div className="relative">
-                        <div className={`flex items-center ${isAutoPopulatedContact ? 'bg-blue-50 border-2 border-solid border-blue-300' : 'bg-gray-50 border-2 border-solid border-gray-300'} rounded-lg px-4 py-3 min-h-[44px]`}>
-                            <svg className="h-4 w-4 text-gray-400 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                            </svg>
-                            <span className={`${isAutoPopulatedContact ? 'text-blue-700 font-medium' : 'text-gray-800'}`}>
-                                {lookupDisplayValue || (isAutoPopulatedContact ? "Auto-populated with your contact" : "Lookup field (read-only)")}
-                            </span>
-                        </div>
-                    </div>
+                    <LookupFieldDisplay
+                        displayValue={lookupDisplayValue}
+                        isAutoPopulated={isAutoPopulatedContact}
+                    />
                 )
 
             case 'richtext':
                 return (
-                    <SimpleRichTextEditor
-                        value={value || ''}
-                        onChange={(content) => handleInputChange(field.datafieldname, content)}
+                    <RichTextField
+                        value={value}
+                        onChange={handleInputChange}
                         disabled={isDisabled}
-                        placeholder={`Enter ${getFieldDisplayName(field).toLowerCase()}...`}
+                        placeholder={`Enter ${placeholder.toLowerCase()}...`}
+                        fieldName={fieldName}
                     />
                 )
 
             default:
                 return (
-                    <input
-                        type="text"
-                        value={value || ''}
-                        onChange={(e) => handleInputChange(field.datafieldname, e.target.value)}
+                    <TextField
+                        value={value}
+                        onChange={handleInputChange}
                         disabled={isDisabled}
-                        className={baseClassName}
-                        placeholder={getFieldDisplayName(field)}
+                        placeholder={placeholder}
+                        fieldName={fieldName}
                     />
                 )
         }
@@ -835,68 +812,47 @@ function EntityEdit() {
             )
         }
         
+        // Empty value display using shared component
         if (value === null || value === undefined || value === '') {
-            return (
-                <div className="bg-gray-50 border-2 border-solid border-gray-300 rounded-lg px-4 py-3 flex items-center">
-                    <svg className="h-4 w-4 text-gray-400 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-                    </svg>
-                    <span className="text-gray-600 italic">Not provided</span>
-                </div>
-            )
+            return <DisabledFieldDisplay value={null} />
         }
 
-        const readOnlyFieldStyle = "bg-gray-50 border-2 border-solid border-gray-300 rounded-lg px-4 py-3 flex items-center min-h-[44px]"
-        const readOnlyIcon = (
-            <svg className="h-4 w-4 text-gray-400 mr-2 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
-            </svg>
-        )
-
+        // Format values for special field types
+        let displayValue = value
+        
         switch (field.controlType) {
             case 'datetime':
-                return (
-                    <div className={readOnlyFieldStyle}>
-                        {readOnlyIcon}
-                        <span className="text-gray-800">{formatNorwegianDateTime(value)}</span>
-                    </div>
-                )
+                displayValue = formatNorwegianDateTime(value)
+                break
             case 'boolean':
-                return (
-                    <div className={readOnlyFieldStyle}>
-                        {readOnlyIcon}
-                        <span className="text-gray-800">{value ? 'Yes' : 'No'}</span>
-                    </div>
-                )
+                displayValue = value ? 'Yes' : 'No'
+                break
             case 'email':
                 return (
-                    <div className={readOnlyFieldStyle}>
-                        {readOnlyIcon}
-                        <a href={`mailto:${value}`} className="text-blue-600 hover:text-blue-800 font-medium">{value}</a>
-                    </div>
+                    <DisabledFieldDisplay 
+                        value={value}
+                        displayValue={
+                            <a href={`mailto:${value}`} className="text-blue-600 hover:text-blue-800 font-medium">{value}</a>
+                        }
+                    />
                 )
             case 'phone':
                 return (
-                    <div className={readOnlyFieldStyle}>
-                        {readOnlyIcon}
-                        <a href={`tel:${value}`} className="text-blue-600 hover:text-blue-800 font-medium">{value}</a>
-                    </div>
+                    <DisabledFieldDisplay 
+                        value={value}
+                        displayValue={
+                            <a href={`tel:${value}`} className="text-blue-600 hover:text-blue-800 font-medium">{value}</a>
+                        }
+                    />
                 )
             case 'lookup':
-                return (
-                    <div className={readOnlyFieldStyle}>
-                        {readOnlyIcon}
-                        <span className="text-gray-800">{getLookupDisplayValue(field.datafieldname, value, formData)}</span>
-                    </div>
-                )
+                displayValue = getLookupDisplayValue(field.datafieldname, value, formData)
+                break
             default:
-                return (
-                    <div className={readOnlyFieldStyle}>
-                        {readOnlyIcon}
-                        <span className="text-gray-800">{String(value)}</span>
-                    </div>
-                )
+                displayValue = String(value)
         }
+
+        return <DisabledFieldDisplay value={value} displayValue={displayValue} />
     }
 
     // Helper function to get display value for lookup fields

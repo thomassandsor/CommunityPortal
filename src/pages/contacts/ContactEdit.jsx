@@ -9,7 +9,7 @@ function ContactEdit() {
     const { user, isLoaded } = useUser()
     const { getToken } = useAuth()
     const navigate = useNavigate()
-    const { contact, loading, refreshContact } = useContactContext()
+    const { contact, loading, fetchContactByEmail } = useContactContext()
     const [error, setError] = useState(null)
     const [isEditing, setIsEditing] = useState(false)
     const [showSuccessMessage, setShowSuccessMessage] = useState(false)
@@ -51,7 +51,9 @@ function ContactEdit() {
             console.log('Contact saved successfully:', data.contact.contactid)
             
             // Refresh contact in context
-            await refreshContact()
+            if (user?.primaryEmailAddress?.emailAddress) {
+                await fetchContactByEmail(user.primaryEmailAddress.emailAddress)
+            }
             
             setIsEditing(false)
             
