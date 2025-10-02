@@ -59,8 +59,15 @@ function validateFieldSecurity(data, formMetadata, entityLogicalName) {
     
     // Extract all allowed field names from form metadata
     const allowedFields = new Set()
+    let hasLastNameField = false
+    
     if (formMetadata?.structure?.tabs) {
         formMetadata.structure.tabs.forEach(tab => {
+            // Skip subgrid tabs - they don't contain editable fields
+            if (tab.type === 'subgrid') {
+                return
+            }
+            
             if (tab.sections) {
                 tab.sections.forEach(section => {
                     if (section.rows) {
@@ -69,10 +76,19 @@ function validateFieldSecurity(data, formMetadata, entityLogicalName) {
                                 row.cells.forEach(cell => {
                                     if (cell.controls) {
                                         cell.controls.forEach(control => {
+                                            // Only process regular form controls (not subgrids)
                                             if (control.datafieldname && control.type === 'control') {
+                                                logDebug(`🔒 Adding allowed field: ${control.datafieldname} (type: ${control.controlType})`)
                                                 allowedFields.add(control.datafieldname.toLowerCase())
                                                 // Also allow the lookup field variant (_fieldname_value)
                                                 allowedFields.add(`_${control.datafieldname}_value`.toLowerCase())
+                                                
+                                                // Track if lastname field exists (for fullname pattern)
+                                                if (control.datafieldname.toLowerCase() === 'lastname') {
+                                                    hasLastNameField = true
+                                                }
+                                            } else if (control.type === 'subgrid') {
+                                                logDebug(`🔒 Skipping subgrid control: ${control.id} (not a data field)`)
                                             }
                                         })
                                     }
@@ -85,9 +101,20 @@ function validateFieldSecurity(data, formMetadata, entityLogicalName) {
         })
     }
     
+    // SPECIAL CASE: If form has lastname field, also allow firstname
+    // This handles Contact forms where fullname is computed from firstname+lastname
+    // but forms might only show one field explicitly
+    if (hasLastNameField && entityLogicalName === 'contact') {
+        logDebug(`🔒 SPECIAL CASE: Contact form with lastname - auto-allowing firstname for fullname pattern`)
+        allowedFields.add('firstname')
+        allowedFields.add('_firstname_value')
+    }
+    
     logDebug(`🔒 Field Security Check for ${entityLogicalName}:`)
     logDebug(`🔒   Allowed fields: ${allowedFields.size}`)
+    logDebug(`🔒   Allowed fields list: ${Array.from(allowedFields).join(', ')}`)
     logDebug(`🔒   Incoming fields: ${incomingFields.length}`)
+    logDebug(`🔒   Incoming fields list: ${incomingFields.join(', ')}`)
     
     // Fields that are legitimate metadata and should be exempted from validation
     const METADATA_FIELDS = ['@odata.etag', 'contactguid', 'contactGuid']
@@ -2145,6 +2172,11 @@ function parseRowsFromSectionXml(sectionXml) {
 
         // Group controls into rows (for simplicity, each control is its own row)
         controlMatches.forEach((controlXml, controlIndex) => {
+            // Log ALL control IDs for debugging
+            const idMatch = controlXml.match(/id="([^"]*)"/)
+            const datafieldMatch = controlXml.match(/datafieldname="([^"]*)"/)
+            logDebug(`🔍 Control ${controlIndex}: id="${idMatch?.[1] || 'none'}", datafieldname="${datafieldMatch?.[1] || 'none'}"`)
+            
             // DYNAMIC SubGrid detection: Check if control has SubGrid parameters structure
             // Instead of hardcoded classid, look for the actual SubGrid metadata
             const hasSubgridParameters = controlXml.includes('<parameters>') && 
