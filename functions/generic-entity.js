@@ -277,6 +277,8 @@ export const handler = async (event) => {
                     return await handleListRequest(accessToken, entityConfig, userContact, viewMode, origin, event)
                 } else if (mode === 'form') {
                     return await handleFormMetadataRequest(accessToken, entityConfig, userContact, origin)
+                } else if (mode === 'subgrid') {
+                    return await handleSubgridRequest(accessToken, entityConfig, userContact, event, origin)
                 } else if (entityId) {
                     return await handleSingleEntityRequest(accessToken, entityConfig, userContact, entityId, origin)
                 } else {
@@ -345,6 +347,60 @@ async function getEntityMetadata(accessToken, entityLogicalName) {
     }
     
     return entity
+}
+
+/**
+ * Get relationship metadata from Dataverse Metadata API
+ * Finds the exact lookup field name for a relationship
+ */
+async function getRelationshipMetadata(accessToken, parentEntityName, relationshipName) {
+    try {
+        logDebug(`🔗 Getting relationship metadata: ${parentEntityName}.${relationshipName}`)
+        
+        // Query EntityDefinitions for the parent entity with relationship expansion
+        const url = `${process.env.DATAVERSE_URL}/api/data/v9.0/EntityDefinitions?$filter=LogicalName eq '${parentEntityName}'&$expand=OneToManyRelationships($filter=SchemaName eq '${relationshipName}';$select=SchemaName,ReferencedEntity,ReferencedAttribute,ReferencingEntity,ReferencingAttribute,ReferencingEntityNavigationPropertyName)`
+        
+        const response = await fetchWithTimeout(url, {
+            method: 'GET',
+            headers: {
+                'Authorization': `Bearer ${accessToken}`,
+                'OData-MaxVersion': '4.0',
+                'OData-Version': '4.0',
+                'Accept': 'application/json',
+            },
+        }, 30000)
+
+        if (!response.ok) {
+            const errorText = await response.text()
+            logError(`Failed to fetch relationship metadata: ${response.status}`, errorText)
+            return null
+        }
+
+        const data = await response.json()
+        const entity = data.value?.[0]
+        
+        if (!entity || !entity.OneToManyRelationships || entity.OneToManyRelationships.length === 0) {
+            logWarn(`⚠️ Relationship not found: ${relationshipName}`)
+            return null
+        }
+        
+        const relationship = entity.OneToManyRelationships[0]
+        
+        logDebug(`✅ Found relationship: ${relationship.ReferencingEntity}.${relationship.ReferencingAttribute}`)
+        
+        return {
+            referencingEntity: relationship.ReferencingEntity,
+            referencingAttribute: relationship.ReferencingAttribute,
+            referencedEntity: relationship.ReferencedEntity,
+            referencedAttribute: relationship.ReferencedAttribute,
+            navigationProperty: relationship.ReferencingEntityNavigationPropertyName,
+            schemaName: relationship.SchemaName
+        }
+        
+    } catch (error) {
+        logError('Error fetching relationship metadata:', error)
+        return null
+    }
 }
 
 /**
@@ -495,12 +551,110 @@ async function handleFormMetadataRequest(accessToken, entityConfig, userContact,
         throw new Error('Form GUID not configured for this entity')
     }
 
-    const formMetadata = await getFormMetadata(accessToken, entityConfig.formGuid)
+    const formMetadata = await getFormMetadata(accessToken, entityConfig.formGuid, entityConfig.entityLogicalName)
     
     return createSuccessResponse({
         formMetadata: formMetadata,
         entityConfig: entityConfig,
         mode: 'form'
+    }, 200, origin)
+}
+
+/**
+ * Handle subgrid request - get related records for a parent entity
+ */
+async function handleSubgridRequest(accessToken, entityConfig, userContact, event, origin = null) {
+    const params = event.queryStringParameters
+    const parentId = params.parentId
+    const relationshipField = params.relationshipField
+    const viewId = params.viewId  // NEW: Get view ID for subgrid
+    
+    logDebug(`📋 Fetching subgrid for ${entityConfig.entityLogicalName}...`)
+    logDebug(`📋 Parent ID: ${parentId}`)
+    logDebug(`📋 Relationship field: ${relationshipField}`)
+    logDebug(`📋 View ID: ${viewId}`)
+    
+    if (!parentId || !relationshipField) {
+        throw new Error('parentId and relationshipField are required for subgrid mode')
+    }
+    
+    // 🔒 SECURITY: Validate GUID format to prevent injection
+    if (!isValidGuid(parentId)) {
+        throw new Error('Invalid parent ID format')
+    }
+    
+    // Build OData filter for relationship
+    let filter = `${relationshipField} eq '${parentId}'`
+    
+    // 🔒 SECURITY: Apply contact-based filtering if entity has contact relation
+    const contactRelationField = entityConfig.contactRelationField || entityConfig.cp_contactrelationfield
+    if (contactRelationField && userContact && userContact.contactid) {
+        const contactFilter = `_${contactRelationField}_value eq '${userContact.contactid}'`
+        filter = `${filter} and ${contactFilter}`
+        logDebug(`🔒 SECURITY: Applied contact filter for subgrid: ${contactFilter}`)
+    }
+    
+    //🔒 SECURITY: Pagination limits
+    const MAX_SUBGRID_RECORDS = 50  // Limit subgrid records
+    const top = Math.min(parseInt(params.$top || MAX_SUBGRID_RECORDS, 10), MAX_SUBGRID_RECORDS)
+    
+    // REQUIRED: Get view metadata to determine exact columns for subgrid
+    if (!viewId) {
+        throw new Error('viewId is required for subgrid - cannot determine columns without view metadata')
+    }
+    
+    logDebug(`📋 Fetching view metadata for subgrid view: ${viewId}`)
+    const viewMetadata = await getViewMetadata(accessToken, viewId, entityConfig)
+    
+    if (!viewMetadata || !viewMetadata.columns || viewMetadata.columns.length === 0) {
+        throw new Error(`Failed to get view metadata for subgrid view ${viewId} - cannot render subgrid without column definitions`)
+    }
+    
+    logDebug(`📋 Got view metadata with ${viewMetadata.columns.length} columns`)
+    const queryResult = await buildSmartQueryFromMetadata(viewMetadata, entityConfig)
+    
+    if (!queryResult.select) {
+        throw new Error('Failed to build column selection from view metadata - cannot proceed without defined columns')
+    }
+    
+    const select = queryResult.select
+    const expand = queryResult.expand
+    logDebug(`📋 Subgrid query from view - select: ${select}, expand: ${expand}`)
+    
+    // Build OData query with view-specific fields
+    const selectParam = `$select=${select}`
+    const expandParam = expand ? `&$expand=${expand}` : ''
+    const odataParams = `$filter=${encodeURIComponent(filter)}&${selectParam}${expandParam}&$top=${top}`
+    const url = `${process.env.DATAVERSE_URL}/api/data/v9.0/${entityConfig.entityLogicalName}s?${odataParams}`
+    
+    logDebug(`📋 Subgrid OData URL: ${url}`)
+    
+    const response = await fetchWithTimeout(url, {
+        method: 'GET',
+        headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'OData-MaxVersion': '4.0',
+            'OData-Version': '4.0',
+            'Accept': 'application/json',
+            'Prefer': 'odata.include-annotations="*"'
+        },
+    }, 30000)
+
+    if (!response.ok) {
+        const errorText = await response.text()
+        logError('Failed to fetch subgrid data:', response.status, errorText)
+        throw new Error(`Failed to fetch subgrid data: ${response.status}`)
+    }
+
+    const data = await response.json()
+    
+    logDebug(`✅ Fetched ${data.value?.length || 0} subgrid records`)
+    
+    return createSuccessResponse({
+        entities: data.value || [],
+        count: data.value?.length || 0,
+        mode: 'subgrid',
+        viewMetadata: viewMetadata || null  // Include view metadata for frontend
     }, 200, origin)
 }
 
@@ -666,7 +820,7 @@ async function handleCreateRequest(accessToken, entityConfig, userContact, reque
     }
     
     logDebug(`📋 Fetching form metadata for CREATE operation: ${entityConfig.formGuid}`)
-    const formMetadata = await getFormMetadata(accessToken, entityConfig.formGuid)
+    const formMetadata = await getFormMetadata(accessToken, entityConfig.formGuid, entityConfig.entityLogicalName)
     
     if (!formMetadata) {
         throw new Error(`Form metadata not found for GUID: ${entityConfig.formGuid}`)
@@ -1018,7 +1172,7 @@ async function handleUpdateRequest(accessToken, entityConfig, userContact, entit
     }
     
     logDebug(`📋 Fetching form metadata for GUID: ${entityConfig.formGuid}`)
-    const formMetadata = await getFormMetadata(accessToken, entityConfig.formGuid)
+    const formMetadata = await getFormMetadata(accessToken, entityConfig.formGuid, entityConfig.entityLogicalName)
     
     if (!formMetadata) {
         throw new Error(`Form metadata not found for GUID: ${entityConfig.formGuid}`)
@@ -1585,7 +1739,7 @@ async function getViewMetadata(accessToken, viewGuid, entityConfig = null) {
 /**
  * Get form metadata (reuse from organization function)
  */
-async function getFormMetadata(accessToken, formGuid) {
+async function getFormMetadata(accessToken, formGuid, entityLogicalName = null) {
     // Using process.env.DATAVERSE_URL directly to avoid initialization issues
     
     const url = `${process.env.DATAVERSE_URL}/api/data/v9.0/systemforms(${formGuid})?$select=name,description,formxml`
@@ -1606,7 +1760,7 @@ async function getFormMetadata(accessToken, formGuid) {
     }
 
     const data = await response.json()
-    return parseFormMetadata(data)
+    return await parseFormMetadata(data, accessToken, entityLogicalName)
 }
 
 // Import parsing functions from organization.js
@@ -1760,7 +1914,7 @@ function inferFieldType(fieldName, entityConfig = null) {
     return 'text'
 }
 
-function parseFormMetadata(formData) {
+async function parseFormMetadata(formData, accessToken, entityLogicalName) {
     logDebug('🔍 Parsing form metadata for:', formData.name)
     
     if (!formData.formxml) {
@@ -1775,13 +1929,60 @@ function parseFormMetadata(formData) {
         const formxml = formData.formxml
         logDebug('📋 Form XML length:', formxml.length)
         
-        // Parse tabs from formxml
-        const tabs = parseTabsFromFormXml(formxml)
+        // Parse tabs and subgrids from formxml
+        const parseResult = parseTabsFromFormXml(formxml)
+        const formTabs = parseResult.formTabs || []
+        const subgrids = parseResult.subgrids || []
+        
+        logDebug(`📋 Parsed ${formTabs.length} form tabs, ${subgrids.length} subgrids`)
+        
+        // Enrich subgrids with relationship metadata
+        const enrichedSubgrids = []
+        if (subgrids.length > 0 && accessToken && entityLogicalName) {
+            for (const subgrid of subgrids) {
+                try {
+                    logDebug(`🔗 Enriching subgrid: ${subgrid.displayName}`)
+                    
+                    // Get relationship metadata from Dataverse
+                    const relationshipMeta = await getRelationshipMetadata(
+                        accessToken,
+                        entityLogicalName,
+                        subgrid.relationshipName
+                    )
+                    
+                    if (relationshipMeta) {
+                        // Create subgrid tab with complete metadata
+                        const subgridTab = {
+                            type: 'subgrid',
+                            name: subgrid.id,
+                            displayName: subgrid.displayName,
+                            targetEntity: subgrid.targetEntity,
+                            relationshipName: subgrid.relationshipName,
+                            relationshipField: `_${relationshipMeta.referencingAttribute}_value`,  // Exact lookup field
+                            viewId: subgrid.viewId,
+                            sections: []  // Subgrids don't have sections
+                        }
+                        
+                        enrichedSubgrids.push(subgridTab)
+                        logDebug(`✅ Enriched subgrid: ${subgridTab.displayName} -> ${subgridTab.relationshipField}`)
+                    } else {
+                        logWarn(`⚠️ Could not enrich subgrid: ${subgrid.displayName} (relationship not found)`)
+                    }
+                } catch (error) {
+                    logError(`❌ Error enriching subgrid ${subgrid.displayName}:`, error)
+                }
+            }
+        }
+        
+        // Combine form tabs + enriched subgrid tabs
+        const allTabs = [...formTabs, ...enrichedSubgrids]
+        
+        logDebug(`✅ Total tabs (form + subgrids): ${allTabs.length}`)
         
         return {
             name: formData.name,
             description: formData.description,
-            structure: { tabs: tabs }
+            structure: { tabs: allTabs }
         }
     } catch (error) {
         console.error('❌ Error parsing form metadata:', error.message)
@@ -1797,6 +1998,7 @@ function parseFormMetadata(formData) {
  */
 function parseTabsFromFormXml(formxml) {
     const tabs = []
+    const subgrids = []  // Collect subgrids found in the form
     
     try {
         // Extract tab elements using regex (basic XML parsing)
@@ -1830,7 +2032,21 @@ function parseTabsFromFormXml(formxml) {
             // Extract sections within this tab
             const sections = parseSectionsFromTabXml(tabXml)
             
+            // Collect any subgrids found in sections
+            sections.forEach(section => {
+                section.rows?.forEach(row => {
+                    row.cells?.forEach(cell => {
+                        cell.controls?.forEach(control => {
+                            if (control.type === 'subgrid') {
+                                subgrids.push(control)
+                            }
+                        })
+                    })
+                })
+            })
+            
             tabs.push({
+                type: 'form',
                 name: tabName,
                 displayName: tabLabel,
                 visible: visible,
@@ -1841,12 +2057,15 @@ function parseTabsFromFormXml(formxml) {
             })
         })
         
-        logDebug(`✅ Parsed ${tabs.length} tabs from form XML`)
-        return tabs
+        logDebug(`✅ Parsed ${tabs.length} form tabs from form XML`)
+        logDebug(`📋 Found ${subgrids.length} subgrids in form`)
+        
+        // Return both tabs and subgrids for enrichment
+        return { formTabs: tabs, subgrids: subgrids }
         
     } catch (error) {
         console.error('❌ Error parsing tabs from form XML:', error.message)
-        return []
+        return { formTabs: [], subgrids: [] }
     }
 }
 
@@ -1922,16 +2141,41 @@ function parseRowsFromSectionXml(sectionXml) {
             return []
         }
 
+        logDebug(`🔍 Found ${controlMatches.length} control elements in section`)
+
         // Group controls into rows (for simplicity, each control is its own row)
         controlMatches.forEach((controlXml, controlIndex) => {
-            const control = parseControlFromXml(controlXml)
+            // DYNAMIC SubGrid detection: Check if control has SubGrid parameters structure
+            // Instead of hardcoded classid, look for the actual SubGrid metadata
+            const hasSubgridParameters = controlXml.includes('<parameters>') && 
+                                        (controlXml.includes('<TargetEntityType>') || 
+                                         controlXml.includes('<RelationshipName>'))
             
-            if (control) {
-                rows.push({
-                    cells: [{
-                        controls: [control]
-                    }]
-                })
+            if (hasSubgridParameters) {
+                logDebug(`📋 Found SubGrid control at index ${controlIndex} (detected by parameters structure)`)
+                // Parse subgrid metadata
+                const subgrid = parseSubgridFromXml(controlXml)
+                if (subgrid) {
+                    logDebug(`✅ Successfully parsed subgrid: ${subgrid.displayName}`)
+                    rows.push({
+                        cells: [{
+                            controls: [subgrid]
+                        }]
+                    })
+                } else {
+                    logWarn(`⚠️ Failed to parse subgrid at index ${controlIndex}`)
+                }
+            } else {
+                // Parse regular control
+                const control = parseControlFromXml(controlXml)
+                
+                if (control) {
+                    rows.push({
+                        cells: [{
+                            controls: [control]
+                        }]
+                    })
+                }
             }
         })
         
@@ -2039,6 +2283,60 @@ function inferControlType(fieldName, classType) {
     }
     
     return 'text'
+}
+
+/**
+ * Parse subgrid control from XML
+ * Extracts subgrid metadata including relationship name, target entity, and view ID
+ */
+function parseSubgridFromXml(controlXml) {
+    try {
+        // Extract control ID and label
+        const idMatch = controlXml.match(/id="([^"]*)"/)
+        const labelMatch = controlXml.match(/label="([^"]*)"/)
+        
+        const subgridId = idMatch ? idMatch[1] : 'subgrid'
+        const subgridLabel = labelMatch ? labelMatch[1] : 'Related Records'
+        
+        // Extract parameters section
+        const parametersMatch = controlXml.match(/<parameters>(.*?)<\/parameters>/s)
+        
+        if (!parametersMatch) {
+            logWarn(`⚠️ No parameters found for subgrid: ${subgridId}`)
+            return null
+        }
+        
+        const parametersXml = parametersMatch[1]
+        
+        // Extract key metadata from parameters
+        const targetEntityMatch = parametersXml.match(/<TargetEntityType>([^<]+)<\/TargetEntityType>/)
+        const viewIdMatch = parametersXml.match(/<ViewId>\{?([^}<]+)\}?<\/ViewId>/)
+        const relationshipMatch = parametersXml.match(/<RelationshipName>([^<]+)<\/RelationshipName>/)
+        
+        const targetEntity = targetEntityMatch ? targetEntityMatch[1] : null
+        const viewId = viewIdMatch ? viewIdMatch[1] : null
+        const relationshipName = relationshipMatch ? relationshipMatch[1] : null
+        
+        if (!targetEntity || !relationshipName) {
+            logWarn(`⚠️ Subgrid missing required metadata: ${subgridId}`)
+            return null
+        }
+        
+        logDebug(`📋 Parsed subgrid: ${subgridId} -> ${targetEntity} (${relationshipName})`)
+        
+        return {
+            type: 'subgrid',
+            id: subgridId,
+            displayName: subgridLabel,
+            targetEntity: targetEntity,
+            relationshipName: relationshipName,
+            viewId: viewId
+        }
+        
+    } catch (error) {
+        console.error('❌ Error parsing subgrid from XML:', error.message)
+        return null
+    }
 }
 
 /**

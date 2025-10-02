@@ -4,6 +4,7 @@ import { useUser, useAuth } from '@clerk/clerk-react'
 import { useContactContext } from '../../contexts/ContactContext.jsx'
 import DynamicSidebar from '../../components/shared/DynamicSidebar'
 import SimpleRichTextViewer from '../../components/forms/SimpleRichTextViewer'
+import SubgridTab from '../../components/tables/SubgridTab'
 import { 
     TextField, 
     EmailField, 
@@ -45,6 +46,9 @@ function EntityEdit() {
     const [entityId, setEntityId] = useState(null)
     const [isCreateMode, setIsCreateMode] = useState(false)
     const [modeInitialized, setModeInitialized] = useState(false)
+
+    // Tab navigation state
+    const [activeTabIndex, setActiveTabIndex] = useState(0)
 
     // Initialize mode and selected entity
     useEffect(() => {
@@ -1088,23 +1092,75 @@ function EntityEdit() {
                             </div>
                         )}
 
-                        {/* Form Content */}
+                        {/* Form Content with Horizontal Tab Navigation */}
                         {formMetadata?.structure?.tabs && formMetadata.structure.tabs.length > 0 ? (
-                            <div className="bg-white shadow rounded-lg">
-                                <div className="divide-y divide-gray-200">
-                                    {formMetadata.structure.tabs.map((tab, tabIndex) => {
-                                        return (
-                                        <div key={tab.name} className="p-6 space-y-8">
-                                            {/* Tab Header */}
-                                            <div className="border-b-2 border-gray-200 pb-4">
-                                                <h2 className="text-lg font-medium text-gray-900">
-                                                    {(typeof tab.displayName === 'string' && tab.displayName.trim() !== '' && tab.displayName !== 'true' && tab.displayName !== 'false') ? tab.displayName : (tab.name || 'Form Section')}
-                                                </h2>
-                                            </div>
+                            <div className="bg-white shadow rounded-lg overflow-hidden">
+                                {/* DEBUG: Log all tabs */}
+                                {(() => {
+                                    console.log('🔍 TABS DEBUG - All tabs received from backend:', formMetadata.structure.tabs)
+                                    console.log('🔍 TABS DEBUG - Tab count:', formMetadata.structure.tabs.length)
+                                    console.log('🔍 TABS DEBUG - Tab types:', formMetadata.structure.tabs.map(t => ({ name: t.name, type: t.type, displayName: t.displayName })))
+                                    console.log('🔍 TABS DEBUG - Create mode?', isCreateMode)
+                                    return null
+                                })()}
+                                {/* Horizontal Tab Navigation */}
+                                <div className="border-b border-gray-200">
+                                    <nav className="flex -mb-px overflow-x-auto" aria-label="Tabs">
+                                        {formMetadata.structure.tabs
+                                            .filter(tab => {
+                                                // Filter out subgrid tabs in create mode
+                                                if (isCreateMode && tab.type === 'subgrid') {
+                                                    return false
+                                                }
+                                                return true
+                                            })
+                                            .map((tab, index) => {
+                                                const isActive = activeTabIndex === index
+                                                return (
+                                                    <button
+                                                        key={tab.name}
+                                                        onClick={() => setActiveTabIndex(index)}
+                                                        className={`
+                                                            whitespace-nowrap py-4 px-6 border-b-2 font-medium text-sm transition-colors
+                                                            ${isActive 
+                                                                ? 'border-blue-500 text-blue-600' 
+                                                                : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'
+                                                            }
+                                                        `}
+                                                        aria-current={isActive ? 'page' : undefined}
+                                                    >
+                                                        {(typeof tab.displayName === 'string' && tab.displayName.trim() !== '' && tab.displayName !== 'true' && tab.displayName !== 'false') ? tab.displayName : (tab.name || 'Form Section')}
+                                                        {tab.type === 'subgrid' && (
+                                                            <span className="ml-2 py-0.5 px-2 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
+                                                                Related
+                                                            </span>
+                                                        )}
+                                                    </button>
+                                                )
+                                            })}
+                                    </nav>
+                                </div>
 
-                                            {/* Tab Content - Mixed layout accommodating rich text fields */}
-                                            <div className="space-y-6">
-                                                {tab.sections?.map(section => {
+                                {/* Active Tab Content */}
+                                <div className="p-6">
+                                    {(() => {
+                                        // Get visible tabs (filtered for create mode)
+                                        const visibleTabs = formMetadata.structure.tabs.filter(tab => {
+                                            if (isCreateMode && tab.type === 'subgrid') {
+                                                return false
+                                            }
+                                            return true
+                                        })
+                                        
+                                        const activeTab = visibleTabs[activeTabIndex]
+                                        
+                                        if (!activeTab) return null
+                                        
+                                        // Render form tab
+                                        if (activeTab.type === 'form' || !activeTab.type) {
+                                            return (
+                                                <div className="space-y-8">
+                                                    {activeTab.sections?.map(section => {
                                                     // Collect all fields for this section
                                                     const allFields = []
                                                     section.rows?.forEach(row => {
@@ -1244,12 +1300,25 @@ function EntityEdit() {
                                                             </div>
                                                         </div>
                                                     )
-                                                }).filter(Boolean) // Remove null entries for hidden sections
-                                                }
-                                            </div>
-                                        </div>
-                                        )
-                                    })}
+                                                }).filter(Boolean)} {/* Remove null entries for hidden sections */}
+                                                </div>
+                                            )
+                                        }
+                                        
+                                        // Render subgrid tab
+                                        if (activeTab.type === 'subgrid') {
+                                            return (
+                                                <div>
+                                                    <SubgridTab
+                                                        subgrid={activeTab}
+                                                        parentEntityId={entityId}
+                                                    />
+                                                </div>
+                                            )
+                                        }
+                                        
+                                        return null
+                                    })()}
                                 </div>
                             </div>
                         ) : (
