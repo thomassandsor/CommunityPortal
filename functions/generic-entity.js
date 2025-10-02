@@ -2221,11 +2221,14 @@ function parseRowsFromSectionXml(sectionXml) {
                 const control = parseControlFromXml(controlXml)
                 
                 if (control) {
+                    logDebug(`✅ Parsed control: ${control.datafieldname} (${control.controlType}), label: "${control.displayName}"`)
                     rows.push({
                         cells: [{
                             controls: [control]
                         }]
                     })
+                } else {
+                    logDebug(`⚠️ Skipped control at index ${controlIndex} (no datafieldname or parse failed)`)
                 }
             }
         })
@@ -2318,6 +2321,19 @@ function inferControlType(fieldName, classType) {
         if (classType.includes('Lookup')) return 'lookup'
         if (classType.includes('OptionSet')) return 'optionset'
         if (classType.includes('Boolean')) return 'boolean'
+    }
+    
+    // Check for standard Dataverse lookup fields (Customer, Owner, etc.)
+    const knownLookupFields = [
+        'parentcustomerid',    // Customer lookup (Account or Contact)
+        'ownerid',             // Owner lookup (User or Team)
+        'regardingobjectid',   // Regarding lookup (polymorphic)
+        'transactioncurrencyid', // Currency lookup
+        'createdby',           // Created by user
+        'modifiedby'           // Modified by user
+    ]
+    if (knownLookupFields.includes(fieldName.toLowerCase())) {
+        return 'lookup'
     }
     
     // Then check field name patterns

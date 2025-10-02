@@ -253,6 +253,48 @@ function EntityEdit() {
             console.log(`✅ Loaded form metadata for ${entityName}:`, data.formMetadata)
             console.log(`✅ Loaded entity config for ${entityName}:`, data.entityConfig)
             
+            // Debug: List all fields in the form with their control types
+            if (data.formMetadata?.structure?.tabs) {
+                const allFields = []
+                data.formMetadata.structure.tabs.forEach(tab => {
+                    tab.sections?.forEach(section => {
+                        section.rows?.forEach(row => {
+                            row.cells?.forEach(cell => {
+                                cell.controls?.forEach(control => {
+                                    if (control.type === 'control') {
+                                        allFields.push({
+                                            name: control.datafieldname,
+                                            controlType: control.controlType,
+                                            label: control.displayName
+                                        })
+                                    }
+                                })
+                            })
+                        })
+                    })
+                })
+                console.log('📋 ALL FORM FIELDS:', allFields)
+                console.log('📋 TOTAL FIELD COUNT:', allFields.length)
+                console.log('📋 FIELD NAMES:', allFields.map(f => f.name))
+                console.log('📋 FIELD LABELS:', allFields.map(f => f.label))
+                
+                // Specifically look for parentcustomerid
+                const parentCustomerField = allFields.find(f => f.name === 'parentcustomerid')
+                if (parentCustomerField) {
+                    console.log('🎯 FOUND parentcustomerid field:', parentCustomerField)
+                } else {
+                    console.log('❌ parentcustomerid NOT in form')
+                }
+                
+                // Specifically look for firstname
+                const firstnameField = allFields.find(f => f.name === 'firstname')
+                if (firstnameField) {
+                    console.log('🎯 FOUND firstname field:', firstnameField)
+                } else {
+                    console.log('❌ firstname NOT in form fields returned from backend')
+                }
+            }
+            
             // Return BOTH so they can be used together before state updates
             return {
                 formMetadata: data.formMetadata,
@@ -643,6 +685,8 @@ function EntityEdit() {
         const value = formData[field.datafieldname]
         const fieldName = field.datafieldname
         
+        console.log(`🎨 RENDER FIELD: ${fieldName}, controlType: ${field.controlType}, value:`, value)
+        
         // Hide system fields in create mode
         if (isCreateMode && isSystemField(fieldName)) {
             return null
@@ -769,6 +813,24 @@ function EntityEdit() {
                     console.log(`🔧 LOOKUP FIELD MAPPING: ${field.datafieldname} → ${actualLookupFieldName}`)
                 }
                 
+                // Handle standard Dataverse lookup fields that need _value suffix
+                // Examples: parentcustomerid, ownerid, createdby, modifiedby
+                if (!actualLookupFieldName.startsWith('_') && !actualLookupFieldName.endsWith('_value')) {
+                    // Check if there's a _fieldname_value in the data
+                    const valueFieldName = `_${field.datafieldname}_value`
+                    console.log(`🔍 LOOKUP FIELD CHECK:`, {
+                        fieldName: field.datafieldname,
+                        valueFieldName,
+                        hasProperty: formData.hasOwnProperty(valueFieldName),
+                        valueInData: formData[valueFieldName],
+                        allFormDataKeys: Object.keys(formData).filter(k => k.includes('parent'))
+                    })
+                    if (formData.hasOwnProperty(valueFieldName)) {
+                        actualLookupFieldName = valueFieldName
+                        console.log(`🔧 LOOKUP FIELD MAPPING: ${field.datafieldname} → ${actualLookupFieldName}`)
+                    }
+                }
+                
                 // Get the value from the actual lookup field name
                 const actualLookupValue = formData[actualLookupFieldName] || value
                 const lookupDisplayValue = getLookupDisplayValue(actualLookupFieldName, actualLookupValue, formData)
@@ -815,57 +877,73 @@ function EntityEdit() {
 
     // Render field in view mode (read-only display)
     const renderViewField = (field, value) => {
+        // CRITICAL: For lookup fields, map form field name to actual data field name
+        let actualFieldName = field.datafieldname
+        let actualValue = value
+        
+        if (field.controlType === 'lookup') {
+            // Check if we need to add _value suffix
+            if (!actualFieldName.startsWith('_') && !actualFieldName.endsWith('_value')) {
+                const valueFieldName = `_${field.datafieldname}_value`
+                if (formData.hasOwnProperty(valueFieldName)) {
+                    actualFieldName = valueFieldName
+                    actualValue = formData[valueFieldName]
+                    console.log(`🔧 VIEW MODE LOOKUP MAPPING: ${field.datafieldname} → ${actualFieldName}, value:`, actualValue)
+                }
+            }
+        }
+        
         // Special handling for rich text fields - they need their own null display
         if (field.controlType === 'richtext') {
             return (
                 <SimpleRichTextViewer
-                    content={value || ''}
+                    content={actualValue || ''}
                     emptyMessage="No content provided"
                 />
             )
         }
         
         // Empty value display using shared component
-        if (value === null || value === undefined || value === '') {
+        if (actualValue === null || actualValue === undefined || actualValue === '') {
             return <DisabledFieldDisplay value={null} />
         }
 
         // Format values for special field types
-        let displayValue = value
+        let displayValue = actualValue
         
         switch (field.controlType) {
             case 'datetime':
-                displayValue = formatNorwegianDateTime(value)
+                displayValue = formatNorwegianDateTime(actualValue)
                 break
             case 'boolean':
-                displayValue = value ? 'Yes' : 'No'
+                displayValue = actualValue ? 'Yes' : 'No'
                 break
             case 'email':
                 return (
                     <DisabledFieldDisplay 
-                        value={value}
+                        value={actualValue}
                         displayValue={
-                            <a href={`mailto:${value}`} className="text-blue-600 hover:text-blue-800 font-medium">{value}</a>
+                            <a href={`mailto:actualValue}`} className="text-blue-600 hover:text-blue-800 font-medium">{actualValue}</a>
                         }
                     />
                 )
             case 'phone':
                 return (
                     <DisabledFieldDisplay 
-                        value={value}
+                        value={actualValue}
                         displayValue={
-                            <a href={`tel:${value}`} className="text-blue-600 hover:text-blue-800 font-medium">{value}</a>
+                            <a href={`tel:${actualValue}`} className="text-blue-600 hover:text-blue-800 font-medium">{actualValue}</a>
                         }
                     />
                 )
             case 'lookup':
-                displayValue = getLookupDisplayValue(field.datafieldname, value, formData)
+                displayValue = getLookupDisplayValue(actualFieldName, actualValue, formData)
                 break
             default:
-                displayValue = String(value)
+                displayValue = String(actualValue)
         }
 
-        return <DisabledFieldDisplay value={value} displayValue={displayValue} />
+        return <DisabledFieldDisplay value={actualValue} displayValue={displayValue} />
     }
 
     // Helper function to get display value for lookup fields
@@ -875,6 +953,8 @@ function EntityEdit() {
             value,
             hasEntityData: !!entityData,
             entityKeys: entityData ? Object.keys(entityData) : [],
+            // Show all annotation keys to see what Dataverse returned
+            annotationKeys: entityData ? Object.keys(entityData).filter(k => k.includes('@')) : [],
             configuredContactField: entityConfig?.cp_contactrelationfield,
             isCreateMode,
             hasUserContact: !!userContact
@@ -970,9 +1050,29 @@ function EntityEdit() {
         
         // Check for Dataverse formatted value (standard OData annotation)
         const formattedValueKey = `${fieldName}@OData.Community.Display.V1.FormattedValue`
+        const msFormattedValueKey = `${fieldName}@Microsoft.Dynamics.CRM.formattedvalue`
+        const lookupLogicalNameKey = `${fieldName}@Microsoft.Dynamics.CRM.lookuplogicalname`
+        
+        console.log('🔍 FRONTEND: Checking annotation keys:', {
+            formattedValueKey,
+            msFormattedValueKey,
+            lookupLogicalNameKey,
+            hasODataFormatted: !!entityData[formattedValueKey],
+            hasMSFormatted: !!entityData[msFormattedValueKey],
+            hasLookupLogicalName: !!entityData[lookupLogicalNameKey],
+            odataValue: entityData[formattedValueKey],
+            msValue: entityData[msFormattedValueKey],
+            lookupType: entityData[lookupLogicalNameKey]
+        })
+        
         if (entityData[formattedValueKey]) {
-            console.log('✅ FRONTEND: Returning formatted value:', entityData[formattedValueKey])
+            console.log('✅ FRONTEND: Returning OData formatted value:', entityData[formattedValueKey])
             return entityData[formattedValueKey]
+        }
+        
+        if (entityData[msFormattedValueKey]) {
+            console.log('✅ FRONTEND: Returning MS formatted value:', entityData[msFormattedValueKey])
+            return entityData[msFormattedValueKey]
         }
         
         // Last resort: show truncated GUID with indicator
