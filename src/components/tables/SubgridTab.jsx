@@ -137,8 +137,8 @@ function SubgridTab({ subgrid, parentEntityId }) {
             data: record
         }))
 
-        // Navigate to the entity edit page
-        navigate(`/${subgrid.targetEntity}/${recordId}`)
+        // Navigate to the entity edit page using /entity/{entityName} route structure
+        navigate(`/entity/${subgrid.targetEntity}`)
     }
 
     // Format cell values for display - ALIGNED WITH EntityList.jsx lookup handling
