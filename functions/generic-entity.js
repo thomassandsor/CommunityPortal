@@ -2421,12 +2421,28 @@ function inferControlType(fieldName, classType) {
  */
 function parseSubgridFromXml(controlXml) {
     try {
-        // Extract control ID and label
-        const idMatch = controlXml.match(/id="([^"]*)"/)
-        const labelMatch = controlXml.match(/label="([^"]*)"/)
+        // DEBUG: Log the raw XML to see what we're parsing
+        console.log('🔍 SUBGRID XML:', controlXml)
         
-        const subgridId = idMatch ? idMatch[1] : 'subgrid'
+        // Extract control ID - CRITICAL: Use word boundary to avoid matching "indicationOfSubgrid"
+        // Match: id="..." but NOT indicationOfSubgrid="..."
+        const idMatch = controlXml.match(/\sid="([^"]*)"/)  // \s ensures we match " id=" not "...id="
+        const nameMatch = controlXml.match(/\sname="([^"]*)"/)  // Added \s to avoid matching classname
+        const labelMatch = controlXml.match(/label="([^"]*)"/)
+        const classIdMatch = controlXml.match(/classid="\{?([^}"]+)\}?"/)
+        
+        console.log('🔍 SUBGRID MATCHES:', { 
+            id: idMatch?.[1], 
+            name: nameMatch?.[1], 
+            label: labelMatch?.[1], 
+            classid: classIdMatch?.[1] 
+        })
+        
+        // Use id attribute from control element (this is the actual subgrid name in Dataverse)
+        let subgridId = idMatch ? idMatch[1] : 'subgrid'
         const subgridLabel = labelMatch ? labelMatch[1] : 'Related Records'
+        
+        console.log('🔍 FINAL SUBGRID ID:', subgridId, '| LABEL:', subgridLabel)
         
         // Extract parameters section
         const parametersMatch = controlXml.match(/<parameters>(.*?)<\/parameters>/s)
@@ -2454,10 +2470,13 @@ function parseSubgridFromXml(controlXml) {
         
         logDebug(`📋 Parsed subgrid: ${subgridId} -> ${targetEntity} (${relationshipName})`)
         
+        // Use subgridId (control id) as the display name if label is generic
+        const displayName = (subgridLabel === 'Related Records' || !subgridLabel) ? subgridId : subgridLabel
+        
         return {
             type: 'subgrid',
             id: subgridId,
-            displayName: subgridLabel,
+            displayName: displayName,  // Use meaningful name, not "Related Records"
             targetEntity: targetEntity,
             relationshipName: relationshipName,
             viewId: viewId

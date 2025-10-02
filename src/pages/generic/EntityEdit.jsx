@@ -1238,12 +1238,10 @@ function EntityEdit() {
                                                         `}
                                                         aria-current={isActive ? 'page' : undefined}
                                                     >
-                                                        {(typeof tab.displayName === 'string' && tab.displayName.trim() !== '' && tab.displayName !== 'true' && tab.displayName !== 'false') ? tab.displayName : (tab.name || 'Form Section')}
-                                                        {tab.type === 'subgrid' && (
-                                                            <span className="ml-2 py-0.5 px-2 rounded-full text-xs font-medium bg-blue-100 text-blue-800">
-                                                                Related
-                                                            </span>
-                                                        )}
+                                                        {tab.type === 'subgrid' 
+                                                            ? `Related - ${tab.displayName}`
+                                                            : (typeof tab.displayName === 'string' && tab.displayName.trim() !== '' && tab.displayName !== 'true' && tab.displayName !== 'false') ? tab.displayName : (tab.name || 'Form Section')
+                                                        }
                                                     </button>
                                                 )
                                             })}
