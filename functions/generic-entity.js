@@ -2179,7 +2179,70 @@ function parseRowsFromSectionXml(sectionXml) {
     const rows = []
     
     try {
-        // Extract control elements (fields)
+        // First try to extract row elements (proper Dataverse structure)
+        const rowMatches = sectionXml.match(/<row[^>]*>.*?<\/row>/gs)
+        
+        if (rowMatches && rowMatches.length > 0) {
+            logDebug(`🔍 Found ${rowMatches.length} row elements in section`)
+            
+            // Parse each row
+            rowMatches.forEach((rowXml, rowIndex) => {
+                // Extract cells from this row
+                const cellMatches = rowXml.match(/<cell[^>]*>.*?<\/cell>/gs)
+                
+                if (cellMatches && cellMatches.length > 0) {
+                    logDebug(`🔍 Row ${rowIndex}: Found ${cellMatches.length} cell elements`)
+                    
+                    const rowCells = []
+                    cellMatches.forEach((cellXml, cellIndex) => {
+                        // Extract controls from this cell
+                        const controlMatches = cellXml.match(/<control[^>]*(?:\/>|>.*?<\/control>)/gs)
+                        
+                        if (controlMatches && controlMatches.length > 0) {
+                            const cellControls = []
+                            controlMatches.forEach((controlXml) => {
+                                const idMatch = controlXml.match(/id="([^"]*)"/)
+                                const datafieldMatch = controlXml.match(/datafieldname="([^"]*)"/)
+                                logDebug(`🔍 Row ${rowIndex}, Cell ${cellIndex}: id="${idMatch?.[1] || 'none'}", datafieldname="${datafieldMatch?.[1] || 'none'}"`)
+                                
+                                // Check for subgrid
+                                const hasSubgridParameters = controlXml.includes('<parameters>') && 
+                                                            (controlXml.includes('<TargetEntityType>') || 
+                                                             controlXml.includes('<RelationshipName>'))
+                                
+                                if (hasSubgridParameters) {
+                                    const subgrid = parseSubgridFromXml(controlXml)
+                                    if (subgrid) {
+                                        cellControls.push(subgrid)
+                                    }
+                                } else {
+                                    const control = parseControlFromXml(controlXml)
+                                    if (control) {
+                                        logDebug(`✅ Parsed control: ${control.datafieldname} (${control.controlType}), label: "${control.displayName}"`)
+                                        cellControls.push(control)
+                                    } else {
+                                        logDebug(`⚠️ Skipped control (no datafieldname or parse failed)`)
+                                    }
+                                }
+                            })
+                            
+                            if (cellControls.length > 0) {
+                                rowCells.push({ controls: cellControls })
+                            }
+                        }
+                    })
+                    
+                    if (rowCells.length > 0) {
+                        rows.push({ cells: rowCells })
+                    }
+                }
+            })
+            
+            return rows
+        }
+        
+        // Fallback: If no row elements found, try old method (extract controls directly)
+        logDebug(`⚠️ No row elements found, falling back to direct control extraction`)
         const controlMatches = sectionXml.match(/<control[^>]*(?:\/>|>.*?<\/control>)/gs)
         
         if (!controlMatches) {
