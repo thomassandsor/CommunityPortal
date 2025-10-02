@@ -933,7 +933,7 @@ function EntityEdit() {
         const navigationPropertyMap = {
             '_createdby_value': 'createdby',
             '_modifiedby_value': 'modifiedby',
-            '_parentcustomerid_value': 'parentcustomerid',
+            '_parentcustomerid_value': 'parentcustomerid_account',  // Customer lookup -> Account
             '_cp_contact_value': 'cp_Contact',  // Standard cp_contact mapping
             'cp_contact': 'cp_Contact'           // Form field mapping
         }

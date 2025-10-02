@@ -772,6 +772,29 @@ async function handleSingleEntityRequest(accessToken, entityConfig, userContact,
         }
     }
     
+    // Special handling for Contact entity's parentcustomerid (Customer lookup field)
+    if (entityConfig.entityLogicalName === 'contact' && allFields.includes('_parentcustomerid_value')) {
+        // Add expansion for parent account - Customer lookup can point to account or contact
+        // We'll expand the account navigation property which is most common
+        const parentExpansion = `parentcustomerid_account($select=name)`
+        if (expand) {
+            if (!expand.includes(parentExpansion)) {
+                expand += `,${parentExpansion}`
+            }
+        } else {
+            expand = parentExpansion
+        }
+        logDebug(`🔍 SINGLE ENTITY: Added parentcustomerid (Customer lookup) expansion: ${parentExpansion}`)
+        
+        // Also add OData annotations for customer lookup
+        if (!allFields.includes('_parentcustomerid_value@Microsoft.Dynamics.CRM.lookuplogicalname')) {
+            allFields.push('_parentcustomerid_value@Microsoft.Dynamics.CRM.lookuplogicalname')
+        }
+        if (!allFields.includes('_parentcustomerid_value@OData.Community.Display.V1.FormattedValue')) {
+            allFields.push('_parentcustomerid_value@OData.Community.Display.V1.FormattedValue')
+        }
+    }
+    
     const select = allFields.join(',')
     logDebug(`🎯 SINGLE ENTITY: Final select with ALL fields: ${select}`)
     logDebug(`🎯 SINGLE ENTITY: Final expand: ${expand}`)
@@ -1576,6 +1599,9 @@ function getAllEntityFields(entityLogicalName) {
     if (entityLogicalName === 'contact') {
         // Standard Dataverse contact fields
         commonFields.push('firstname', 'lastname', 'fullname', 'emailaddress1', 'mobilephone', '_parentcustomerid_value')
+        // Add OData annotation fields for customer lookup
+        commonFields.push('_parentcustomerid_value@Microsoft.Dynamics.CRM.lookuplogicalname')
+        commonFields.push('_parentcustomerid_value@OData.Community.Display.V1.FormattedValue')
     } else if (entityLogicalName === 'account') {
         // Standard Dataverse account fields  
         commonFields.push('name', 'emailaddress1', '_primarycontactid_value')
