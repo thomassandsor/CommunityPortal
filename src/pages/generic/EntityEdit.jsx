@@ -28,7 +28,7 @@ function EntityEdit() {
     const { getToken } = useAuth()
     
     // SECURITY: Get current user's contact from secure context (no sessionStorage)
-    const { contact: userContact, getContactGuid, getAccountGuid, getDisplayName } = useContactContext()
+    const { contact: userContact, getContactGuid, getAccountGuid, getDisplayName, loading: contactLoading, hasContact } = useContactContext()
     
     const [entity, setEntity] = useState(null)
     const [entityConfig, setEntityConfig] = useState(null)
@@ -89,7 +89,8 @@ function EntityEdit() {
 
     // Single useEffect to fetch data efficiently
     useEffect(() => {
-        if (user && entityName && !dataInitialized && modeInitialized) {
+        // CRITICAL: Wait for contact to be loaded before fetching entity data
+        if (user && entityName && !dataInitialized && modeInitialized && !contactLoading && hasContact()) {
             console.log(`🔍 Fetching data for ${entityName}${entityId ? `: ${entityId}` : ' (create mode)'}`)
             
             const promises = [fetchFormMetadata()]
@@ -122,7 +123,7 @@ function EntityEdit() {
                 setLoading(false)
             })
         }
-    }, [user, entityName, entityId, dataInitialized, isCreateMode, modeInitialized, selectedEntity])
+    }, [user, entityName, entityId, dataInitialized, isCreateMode, modeInitialized, selectedEntity, contactLoading, hasContact])
 
     // CRITICAL: Re-initialize form data when user contact becomes available in context
     useEffect(() => {

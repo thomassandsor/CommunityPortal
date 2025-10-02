@@ -9,7 +9,7 @@ function EntityList() {
     const navigate = useNavigate()
     const { user, isLoaded } = useUser()
     const { getToken } = useAuth()
-    const { getContactGuid } = useContactContext()
+    const { getContactGuid, loading: contactLoading, hasContact } = useContactContext()
     
     const [entities, setEntities] = useState([])
     const [entityConfig, setEntityConfig] = useState(null)
@@ -20,10 +20,11 @@ function EntityList() {
     const [userIsAdmin, setUserIsAdmin] = useState(false)
 
     useEffect(() => {
-        if (isLoaded && user && entityName) {
+        // CRITICAL: Wait for contact to be loaded before fetching entity data
+        if (isLoaded && user && entityName && !contactLoading && hasContact()) {
             fetchEntityList()
         }
-    }, [isLoaded, user, entityName, viewMode])
+    }, [isLoaded, user, entityName, viewMode, contactLoading, hasContact])
 
     const fetchEntityList = async () => {
         // Simple duplicate prevention - only if currently loading the same entity
@@ -626,8 +627,18 @@ function EntityList() {
                 {/* Main Content */}
                 <main className="flex-1 p-6">
                     <div className="max-w-7xl mx-auto">
+                        {/* Contact Loading State */}
+                        {contactLoading && (
+                            <div className="bg-white shadow rounded-lg p-6">
+                                <div className="flex items-center justify-center">
+                                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
+                                    <div className="ml-3 text-lg text-gray-600">Loading user profile...</div>
+                                </div>
+                            </div>
+                        )}
+                        
                         {/* Loading State */}
-                        {loading && (
+                        {loading && !contactLoading && (
                             <div className="bg-white shadow rounded-lg p-6">
                                 <div className="flex items-center justify-center">
                                     <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
