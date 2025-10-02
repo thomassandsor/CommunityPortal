@@ -10,10 +10,12 @@
  */
 
 import { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '@clerk/clerk-react'
 import { useContactContext } from '../../contexts/ContactContext'
 
 function SubgridTab({ subgrid, parentEntityId }) {
+    const navigate = useNavigate()
     const { getToken } = useAuth()
     const { getContactGuid } = useContactContext()
     
@@ -21,10 +23,45 @@ function SubgridTab({ subgrid, parentEntityId }) {
     const [viewMetadata, setViewMetadata] = useState(null)  // NEW: Store view metadata
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
+    const [entityConfigExists, setEntityConfigExists] = useState(false)
+    const [checkingConfig, setCheckingConfig] = useState(true)
 
     useEffect(() => {
         fetchSubgridRecords()
+        checkEntityConfiguration()
     }, [subgrid, parentEntityId])
+
+    /**
+     * Check if the target entity has a configuration
+     * This determines if we can navigate to the edit page
+     */
+    const checkEntityConfiguration = async () => {
+        try {
+            setCheckingConfig(true)
+            const token = await getToken()
+
+            const response = await fetch(`/.netlify/functions/entity-config?entity=${subgrid.targetEntity}`, {
+                headers: {
+                    'Authorization': `Bearer ${token}`,
+                    'Content-Type': 'application/json'
+                }
+            })
+
+            if (response.ok) {
+                const data = await response.json()
+                setEntityConfigExists(!!data.config)
+                console.log(`✅ Entity config exists for ${subgrid.targetEntity}:`, !!data.config)
+            } else {
+                setEntityConfigExists(false)
+                console.log(`⚠️ No entity config found for ${subgrid.targetEntity}`)
+            }
+        } catch (err) {
+            console.error(`Error checking entity config for ${subgrid.targetEntity}:`, err)
+            setEntityConfigExists(false)
+        } finally {
+            setCheckingConfig(false)
+        }
+    }
 
     const fetchSubgridRecords = async () => {
         try {
@@ -78,6 +115,30 @@ function SubgridTab({ subgrid, parentEntityId }) {
         } finally {
             setLoading(false)
         }
+    }
+
+    /**
+     * Handle view/edit button click
+     * Navigate to the entity edit page
+     */
+    const handleViewRecord = (record) => {
+        const recordId = record[`${subgrid.targetEntity}id`]
+        
+        if (!recordId) {
+            console.error('Cannot navigate: Record ID not found')
+            return
+        }
+
+        console.log(`📝 Navigating to edit ${subgrid.targetEntity}: ${recordId}`)
+        
+        // Store the selected entity in sessionStorage for the edit page
+        sessionStorage.setItem(`selected_${subgrid.targetEntity}`, JSON.stringify({
+            id: recordId,
+            data: record
+        }))
+
+        // Navigate to the entity edit page
+        navigate(`/${subgrid.targetEntity}/${recordId}`)
     }
 
     // Format cell values for display - ALIGNED WITH EntityList.jsx lookup handling
@@ -307,9 +368,22 @@ function SubgridTab({ subgrid, parentEntityId }) {
                                             </td>
                                         ))}
                                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
-                                            <button className="text-blue-600 hover:text-blue-900 transition-colors">
-                                                View
-                                            </button>
+                                            {entityConfigExists ? (
+                                                <button 
+                                                    onClick={() => handleViewRecord(record)}
+                                                    className="text-blue-600 hover:text-blue-900 transition-colors"
+                                                    title={`Edit ${subgrid.displayName}`}
+                                                >
+                                                    View
+                                                </button>
+                                            ) : (
+                                                <span 
+                                                    className="text-gray-400 cursor-not-allowed" 
+                                                    title={`${subgrid.targetEntity} is not configured for editing`}
+                                                >
+                                                    View
+                                                </span>
+                                            )}
                                         </td>
                                     </tr>
                                 )
