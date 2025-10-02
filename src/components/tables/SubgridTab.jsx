@@ -24,6 +24,7 @@ function SubgridTab({ subgrid, parentEntityId }) {
     const [loading, setLoading] = useState(true)
     const [error, setError] = useState(null)
     const [entityConfigExists, setEntityConfigExists] = useState(false)
+    const [targetEntityConfig, setTargetEntityConfig] = useState(null)
     const [checkingConfig, setCheckingConfig] = useState(true)
 
     useEffect(() => {
@@ -49,8 +50,16 @@ function SubgridTab({ subgrid, parentEntityId }) {
 
             if (response.ok) {
                 const data = await response.json()
-                setEntityConfigExists(!!data.config)
-                console.log(`✅ Entity config exists for ${subgrid.targetEntity}:`, !!data.config)
+                const config = data.config
+                
+                if (config) {
+                    setEntityConfigExists(true)
+                    setTargetEntityConfig(config)
+                    console.log(`✅ Entity config exists for ${subgrid.targetEntity}:`, config.cp_name || config.name)
+                } else {
+                    setEntityConfigExists(false)
+                    console.log(`⚠️ No entity config found for ${subgrid.targetEntity}`)
+                }
             } else {
                 setEntityConfigExists(false)
                 console.log(`⚠️ No entity config found for ${subgrid.targetEntity}`)
@@ -129,16 +138,20 @@ function SubgridTab({ subgrid, parentEntityId }) {
             return
         }
 
-        console.log(`📝 Navigating to edit ${subgrid.targetEntity}: ${recordId}`)
+        // Get the cp_name from the entity configuration for the route
+        const routeName = targetEntityConfig?.cp_name || targetEntityConfig?.name || subgrid.targetEntity
+        
+        console.log(`📝 Navigating to edit ${routeName} (${subgrid.targetEntity}): ${recordId}`)
         
         // Store the selected entity in sessionStorage for the edit page
-        sessionStorage.setItem(`selected_${subgrid.targetEntity}`, JSON.stringify({
+        // Use the cp_name as the key (matching how EntityList stores it)
+        sessionStorage.setItem(`selected_${routeName}`, JSON.stringify({
             id: recordId,
             data: record
         }))
 
-        // Navigate to the entity edit page using /entity/{entityName} route structure
-        navigate(`/entity/${subgrid.targetEntity}`)
+        // Navigate to the entity edit page using cp_name from config (e.g., /entity/Idea/edit)
+        navigate(`/entity/${routeName}/edit`)
     }
 
     // Format cell values for display - ALIGNED WITH EntityList.jsx lookup handling

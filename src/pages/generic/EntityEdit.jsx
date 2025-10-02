@@ -52,6 +52,14 @@ function EntityEdit() {
 
     // Initialize mode and selected entity
     useEffect(() => {
+        // CRITICAL: Reset dataInitialized when entityName changes (navigating between different entities)
+        setDataInitialized(false)
+        setLoading(true)
+        setActiveTabIndex(0)  // Reset to first tab when switching entities
+        setEntity(null)  // Clear previous entity data
+        setFormMetadata(null)  // Clear previous form metadata
+        setEntityConfig(null)  // Clear previous config
+        
         // Detect create mode from URL path
         const isCreatePath = location.pathname.includes('/create')
         
