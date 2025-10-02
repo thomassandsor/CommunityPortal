@@ -785,14 +785,7 @@ async function handleSingleEntityRequest(accessToken, entityConfig, userContact,
             expand = parentExpansion
         }
         logDebug(`🔍 SINGLE ENTITY: Added parentcustomerid (Customer lookup) expansion: ${parentExpansion}`)
-        
-        // Also add OData annotations for customer lookup
-        if (!allFields.includes('_parentcustomerid_value@Microsoft.Dynamics.CRM.lookuplogicalname')) {
-            allFields.push('_parentcustomerid_value@Microsoft.Dynamics.CRM.lookuplogicalname')
-        }
-        if (!allFields.includes('_parentcustomerid_value@OData.Community.Display.V1.FormattedValue')) {
-            allFields.push('_parentcustomerid_value@OData.Community.Display.V1.FormattedValue')
-        }
+        // Note: OData annotations are automatically returned with Prefer: odata.include-annotations="*" header
     }
     
     const select = allFields.join(',')
@@ -813,6 +806,7 @@ async function handleSingleEntityRequest(accessToken, entityConfig, userContact,
             'OData-MaxVersion': '4.0',
             'OData-Version': '4.0',
             'Accept': 'application/json',
+            'Prefer': 'odata.include-annotations="*"'  // Include OData annotations (formatted values, lookup types, etc.)
         },
     }, 30000)  // 30s timeout
 
@@ -1599,9 +1593,8 @@ function getAllEntityFields(entityLogicalName) {
     if (entityLogicalName === 'contact') {
         // Standard Dataverse contact fields
         commonFields.push('firstname', 'lastname', 'fullname', 'emailaddress1', 'mobilephone', '_parentcustomerid_value')
-        // Add OData annotation fields for customer lookup
-        commonFields.push('_parentcustomerid_value@Microsoft.Dynamics.CRM.lookuplogicalname')
-        commonFields.push('_parentcustomerid_value@OData.Community.Display.V1.FormattedValue')
+        // Note: OData annotation fields are automatically included by Dataverse when using Prefer header
+        // We don't need to explicitly select them
     } else if (entityLogicalName === 'account') {
         // Standard Dataverse account fields  
         commonFields.push('name', 'emailaddress1', '_primarycontactid_value')
