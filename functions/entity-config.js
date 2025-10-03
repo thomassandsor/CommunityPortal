@@ -140,14 +140,12 @@ async function getAllEntityConfigs(accessToken, isAdmin) {
         'cp_entitylogicalname',
         'cp_formguid',
         'cp_viewmainguid',
-        'cp_viewsubgridguid',
         'cp_contactrelationfield',
         'cp_accountrelationfield',
         'cp_showinmenu',
         'cp_menuicon',
         'cp_menuorder',
-        'cp_requiresadmin',
-        'cp_enablesubgridedit'
+        'cp_requiresadmin'
     ].join(',')
 
     const url = `${DATAVERSE_URL}/api/data/v9.0/cp_entityconfigs?$filter=${encodeURIComponent(filter)}&$select=${select}&$orderby=cp_menuorder`
@@ -215,14 +213,12 @@ async function getEntityConfig(accessToken, entityName, isAdmin) {
         'cp_entitylogicalname',
         'cp_formguid',
         'cp_viewmainguid',
-        'cp_viewsubgridguid',
         'cp_contactrelationfield',
         'cp_accountrelationfield',
         'cp_showinmenu',
         'cp_menuicon',
         'cp_menuorder',
-        'cp_requiresadmin',
-        'cp_enablesubgridedit'
+        'cp_requiresadmin'
     ].join(',')
 
     const url = `${DATAVERSE_URL}/api/data/v9.0/cp_entityconfigs?$filter=${encodeURIComponent(filter)}&$select=${select}`
@@ -277,7 +273,6 @@ function normalizeEntityConfig(rawConfig) {
         urlPath: urlPath, // Direct use of cp_name for URLs
         formGuid: rawConfig.cp_formguid,
         viewMainGuid: rawConfig.cp_viewmainguid,
-        viewSubgridGuid: rawConfig.cp_viewsubgridguid,
         contactRelationField: rawConfig.cp_contactrelationfield,
         accountRelationField: rawConfig.cp_accountrelationfield,
         // BACKWARD COMPATIBILITY: Keep original field names for frontend access
@@ -287,7 +282,6 @@ function normalizeEntityConfig(rawConfig) {
         menuIcon: rawConfig.cp_menuicon,
         menuOrder: rawConfig.cp_menuorder,
         requiresAdmin: rawConfig.cp_requiresadmin,
-        enableSubgridEdit: rawConfig.cp_enablesubgridedit,
         description: rawConfig.cp_description || null,
         // Computed properties using cp_name directly
         listPath: `/entity/${urlPath}`,
