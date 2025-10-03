@@ -1,12 +1,14 @@
 import { useState, useEffect } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useUser, useAuth, UserButton } from '@clerk/clerk-react'
+import { useContactContext } from '../../contexts/ContactContext'
 
 function DynamicSidebar() {
     const navigate = useNavigate()
     const location = useLocation()
     const { user, isLoaded } = useUser()
     const { getToken } = useAuth()
+    const { contact: userContact, getAccountGuid, loading: contactLoading } = useContactContext()
     
     const [menuItems, setMenuItems] = useState([])
     const [loading, setLoading] = useState(true)
@@ -14,10 +16,11 @@ function DynamicSidebar() {
     const [isCollapsed, setIsCollapsed] = useState(false)
 
     useEffect(() => {
-        if (isLoaded && user) {
+        // Wait for both Clerk user and contact data to be loaded
+        if (isLoaded && user && !contactLoading && userContact) {
             fetchMenuItems()
         }
-    }, [isLoaded, user])
+    }, [isLoaded, user, contactLoading, userContact])
 
     const fetchMenuItems = async (clearCache = false) => {
         // Only prevent if already in progress for the exact same user
@@ -63,6 +66,17 @@ function DynamicSidebar() {
     }
 
     const buildMenuItems = (configs) => {
+        // Get user's admin status and account association
+        const userIsAdmin = userContact?.cp_portaladmin === true
+        const userHasAccount = !!getAccountGuid()
+        
+        console.log('🔒 SIDEBAR SECURITY CHECK:', {
+            userIsAdmin,
+            userHasAccount,
+            accountGuid: getAccountGuid(),
+            portalAdmin: userContact?.cp_portaladmin
+        })
+        
         // Start with core menu items
         const coreItems = [
             {
@@ -89,9 +103,26 @@ function DynamicSidebar() {
             }
         ]
 
-        // Add configured entity items
+        // Add configured entity items with security filtering
         const entityItems = configs
-            .filter(config => config.showInMenu)
+            .filter(config => {
+                // Must be set to show in menu
+                if (!config.showInMenu) return false
+                
+                // Admin-only entities: hide if user is not admin
+                if (config.requiresAdmin && !userIsAdmin) {
+                    console.log(`🔒 Hiding admin-only entity: ${config.name}`)
+                    return false
+                }
+                
+                // Account-level entities: hide if user doesn't have account association
+                if (config.accountRelationField && !userHasAccount) {
+                    console.log(`🔒 Hiding account-level entity (no account): ${config.name}`)
+                    return false
+                }
+                
+                return true
+            })
             .map(config => ({
                 id: config.entityLogicalName,
                 name: config.name,
