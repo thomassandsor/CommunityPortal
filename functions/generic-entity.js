@@ -20,6 +20,7 @@
 
 import { validateSimpleAuth, createAuthErrorResponse, createSuccessResponse, buildSecureEmailFilter, sanitizeGuid, isValidGuid, validateContactOwnership, getSecureCorsHeaders, checkRateLimit, createRateLimitResponse, createSafeErrorResponse, fetchWithTimeout } from './auth-utils.js'
 import { logDebug, logError, logWarn } from './logger.js'
+import { validateGuid, validateEntityName, escapeODataValue } from './security-utils.js'
 
 // 🔒 SECURITY: System fields that MUST NOT be modified by client requests
 // These fields are managed by Dataverse internally or through admin operations only
@@ -296,7 +297,18 @@ export const handler = async (event) => {
 
         // Route to appropriate handler based on HTTP method and parameters
         const mode = event.queryStringParameters?.mode
-        const entityId = event.queryStringParameters?.id
+        let entityId = event.queryStringParameters?.id
+        
+        // 🔒 SECURITY: Validate entity ID (GUID) to prevent injection
+        if (entityId) {
+            try {
+                entityId = validateGuid(entityId)
+                logDebug(`✅ SECURITY: Entity ID validated: ${entityId}`)
+            } catch (error) {
+                logWarn(`🔒 SECURITY: Invalid entity ID rejected: ${entityId}`)
+                return createAuthErrorResponse('Invalid entity ID format', 400, origin)
+            }
+        }
 
         switch (event.httpMethod) {
             case 'GET':
@@ -689,14 +701,17 @@ async function handleSubgridRequest(accessToken, entityConfig, userContact, even
  * Handle single entity request - ENHANCED USER SCOPING
  */
 async function handleSingleEntityRequest(accessToken, entityConfig, userContact, entityId, origin = null) {
-    logDebug(`🔍 Fetching single ${entityConfig.entityLogicalName}: ${entityId} for user: ${userContact.contactid}`)
+    // 🔒 SECURITY: Validate entity ID before using in query
+    const safeEntityId = validateGuid(entityId)
+    
+    logDebug(`🔍 Fetching single ${entityConfig.entityLogicalName}: ${safeEntityId} for user: ${userContact.contactid}`)
     
     // Using process.env.DATAVERSE_URL directly to avoid initialization issues
     
     // SECURITY ENHANCEMENT: Build mandatory user-scoped security filter
     const securityFilter = await buildEntitySecurityFilter(accessToken, entityConfig, userContact, 'personal')
     const idField = getEntityIdField(entityConfig.entityLogicalName)
-    const filter = `${idField} eq '${entityId}' and (${securityFilter})`
+    const filter = `${idField} eq '${safeEntityId}' and (${securityFilter})`
     
     logDebug(`🛡️ SECURITY: Single entity filter - ${filter}`)
     

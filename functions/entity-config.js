@@ -16,6 +16,7 @@
 
 import { validateSimpleAuth, createAuthErrorResponse, createSuccessResponse, getSecureCorsHeaders, checkRateLimit, createRateLimitResponse, createSafeErrorResponse } from './auth-utils.js'
 import { logDebug, logError, logWarn } from './logger.js'
+import { escapeODataValue, validateEntityName, validateEmail } from './security-utils.js'
 
 // Configuration cache (in production, use Redis or similar)
 const configCache = new Map()
@@ -186,21 +187,26 @@ async function getAllEntityConfigs(accessToken, isAdmin) {
  * Get specific entity configuration
  */
 async function getEntityConfig(accessToken, entityName, isAdmin) {
-    const cacheKey = `config_${entityName}_${isAdmin}`
+    // 🔒 SECURITY: Validate entity name to prevent OData injection
+    const safeEntityName = validateEntityName(entityName)
+    const cacheKey = `config_${safeEntityName}_${isAdmin}`
     
     // Check cache first
     const cached = configCache.get(cacheKey)
     if (cached && Date.now() - cached.timestamp < CACHE_TTL) {
-        logDebug(`📋 Returning cached config for: ${entityName}`)
+        logDebug(`📋 Returning cached config for: ${safeEntityName}`)
         return cached.data
     }
 
-    logDebug(`🔍 Fetching configuration for entity: ${entityName}`)
+    logDebug(`🔍 Fetching configuration for entity: ${safeEntityName}`)
     
     const { DATAVERSE_URL } = process.env
     
+    // 🔒 SECURITY: Escape single quotes in entity name for OData query
+    const escapedEntityName = escapeODataValue(safeEntityName)
+    
     // Build filter for specific entity
-    let filter = `statecode eq 0 and cp_entitylogicalname eq '${entityName}'`
+    let filter = `statecode eq 0 and cp_entitylogicalname eq '${escapedEntityName}'`
     // Note: For single entity lookup, we don't filter by cp_showinmenu 
     // because this is used for entity operations, not just menu display
     if (!isAdmin) {
@@ -296,7 +302,11 @@ function normalizeEntityConfig(rawConfig) {
 async function getUserContact(accessToken, userEmail) {
     const { DATAVERSE_URL } = process.env
     
-    const filter = `emailaddress1 eq '${userEmail.replace(/'/g, "''")}'`
+    // 🔒 SECURITY: Validate and escape email to prevent OData injection
+    const safeEmail = validateEmail(userEmail)
+    const escapedEmail = escapeODataValue(safeEmail)
+    
+    const filter = `emailaddress1 eq '${escapedEmail}'`
     const select = 'contactid,cp_portaladmin,_parentcustomerid_value'
     const url = `${DATAVERSE_URL}/api/data/v9.0/contacts?$filter=${encodeURIComponent(filter)}&$select=${select}`
 
