@@ -352,6 +352,7 @@ function EntityEdit() {
                     
                     // Auto-populate contact fields with current user's contact
                     const currentContactGuid = getContactGuid()
+                    const currentAccountGuid = getAccountGuid()
                     const currentContact = userContact
                     
                     if (isContactField(fieldName, configToUse) && currentContactGuid) {
@@ -389,12 +390,48 @@ function EntityEdit() {
                         
                         // CRITICAL: Return early to prevent setting default value
                         return
-                    } else {
-                        // Use default value for other fields
-                        const defaultValue = getDefaultValue(field)
-                        initialData[fieldName] = defaultValue
-                        console.log(`📝 Set default value for ${fieldName}: ${defaultValue}`)
                     }
+                    
+                    // Auto-populate account fields with current user's account
+                    if (isAccountField(fieldName, configToUse) && currentAccountGuid) {
+                        // Dynamic account field handling using entity configuration
+                        const accountRelationField = configToUse?.accountRelationField || configToUse?.cp_accountrelationfield
+                        
+                        console.log(`🏢 ACCOUNT FIELD DETECTED in initializeFormData:`, {
+                            fieldName,
+                            accountRelationField,
+                            currentAccountGuid
+                        })
+                        
+                        // Handle both form field name and lookup field name
+                        if (fieldName === accountRelationField) {
+                            // Form shows field name but we need to populate "_fieldname_value"
+                            const lookupFieldName = `_${accountRelationField}_value`
+                            initialData[lookupFieldName] = currentAccountGuid
+                            console.log(`🏢 🚨 AUTO-POPULATED account lookup field: ${lookupFieldName} = ${currentAccountGuid}`)
+                        } else if (fieldName.endsWith('_value')) {
+                            // Already in lookup format
+                            initialData[fieldName] = currentAccountGuid
+                            console.log(`🏢 Auto-populated account lookup field ${fieldName} with stored GUID: ${currentAccountGuid}`)
+                        } else {
+                            // Other account-related fields
+                            initialData[fieldName] = currentAccountGuid
+                            console.log(`🏢 Auto-populated account field ${fieldName} with stored GUID: ${currentAccountGuid}`)
+                        }
+                        console.log(`🏢 Account GUID type: ${typeof currentAccountGuid}`)
+                        console.log(`🏢 Account info from user:`, { 
+                            accountGuid: currentAccountGuid,
+                            accountFromContact: currentContact?._parentcustomerid_value
+                        })
+                        
+                        // CRITICAL: Return early to prevent setting default value
+                        return
+                    }
+                    
+                    // Use default value for other fields
+                    const defaultValue = getDefaultValue(field)
+                    initialData[fieldName] = defaultValue
+                    console.log(`📝 Set default value for ${fieldName}: ${defaultValue}`)
                 })
                 
                 console.log('🆕 Final initialized form data:', initialData)
@@ -483,6 +520,36 @@ function EntityEdit() {
         
         if (isMatch) {
             console.log(`🔍 Detected contact field: ${fieldName} (configured: ${configuredContactField})`)
+        }
+        
+        return isMatch
+    }
+
+    // Helper function to identify account lookup fields (dynamic based on entity config)
+    const isAccountField = (fieldName, configOverride = null) => {
+        // Use the configured account relation field from entity config
+        const config = configOverride || entityConfig
+        const configuredAccountField = config?.accountRelationField || config?.cp_accountrelationfield
+        
+        const accountFieldPatterns = [
+            '_parentcustomerid_value',  // Standard Dataverse account lookup (Customer field)
+            'parentcustomerid',          // Customer field (can be account or contact)
+            '_accountid_value',          // Direct account lookup
+            'accountid'                  // Direct account field
+        ]
+        
+        // Add the configured account field and its lookup variant if available
+        if (configuredAccountField) {
+            accountFieldPatterns.push(configuredAccountField)
+            accountFieldPatterns.push(`_${configuredAccountField}_value`)
+        }
+        
+        const isMatch = accountFieldPatterns.some(pattern => 
+            fieldName.toLowerCase() === pattern.toLowerCase()
+        )
+        
+        if (isMatch) {
+            console.log(`🔍 Detected account field: ${fieldName} (configured: ${configuredAccountField})`)
         }
         
         return isMatch
