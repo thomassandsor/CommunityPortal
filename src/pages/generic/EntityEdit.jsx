@@ -524,6 +524,13 @@ function EntityEdit() {
             console.log(`🔍 Full form data before filtering:`, formData)
             const saveData = {}
             Object.entries(formData).forEach(([key, value]) => {
+                // 🔒 SECURITY: Skip OData annotation fields (read-only metadata)
+                // These are returned by Dataverse for display purposes but cannot be updated
+                if (key.includes('@OData.') || key.includes('@Microsoft.Dynamics.CRM.')) {
+                    console.log(`⚠️ SKIPPING OData annotation field: ${key}`)
+                    return
+                }
+                
                 // Skip navigation property objects (e.g., cp_Contact, cp_Organization)
                 // These are read-only expanded entities from Dataverse
                 if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
