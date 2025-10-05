@@ -630,6 +630,27 @@ function EntityEdit() {
                         return
                     }
                     
+                    // Handle account fields - only include the proper _value fields
+                    if (isAccountField(key)) {
+                        // Skip the original form field name, only send the lookup _value field
+                        const configuredAccountField = entityConfig?.cp_accountrelationfield
+                        if (key === configuredAccountField) {
+                            console.log(`⚠️ SKIPPING form field name: ${key} (not a Dataverse field)`)
+                            return
+                        }
+                        
+                        // Only include _value lookup fields if they have values
+                        if (key.endsWith('_value') && value && value !== '' && value !== null && value !== undefined) {
+                            console.log(`✅ Including lookup account field: ${key} = ${value}`)
+                            saveData[key] = value
+                        } else if (key.endsWith('_value')) {
+                            console.log(`⚠️ Skipping empty lookup account field: ${key}`)
+                        } else {
+                            console.log(`⚠️ Skipping non-lookup account field: ${key}`)
+                        }
+                        return
+                    }
+                    
                     // Handle other lookup fields - skip if empty
                     if (key.endsWith('_value') && (value === '' || value === null || value === undefined)) {
                         console.log(`⚠️ Skipping empty lookup field: ${key}`)
@@ -648,6 +669,13 @@ function EntityEdit() {
             Object.entries(saveData).forEach(([key, value]) => {
                 if (key.includes('contact')) {
                     console.log(`🔍 Contact field debug: ${key} = ${value} (type: ${typeof value})`)
+                }
+            })
+            
+            // Debug account field specifically
+            Object.entries(saveData).forEach(([key, value]) => {
+                if (key.includes('account') || key.includes('parentcustomerid')) {
+                    console.log(`🔍 Account field debug: ${key} = ${value} (type: ${typeof value})`)
                 }
             })
             
@@ -1051,6 +1079,27 @@ function EntityEdit() {
                 return displayName
             } else {
                 console.log('⚠️ FRONTEND: No user contact available in context')
+            }
+        }
+        
+        // Special handling for auto-populated account fields in create mode
+        const isAccountLookup = isAccountField(fieldName)
+        console.log('🔍 FRONTEND: Is account field?', isAccountLookup, 'for field:', fieldName)
+        
+        if (isCreateMode && isAccountLookup) {
+            const currentContact = userContact
+            console.log('🔍 FRONTEND: Account data from contact:', currentContact)
+            
+            if (currentContact) {
+                // Try to get account name from the expanded parentcustomerid navigation property
+                const accountName = currentContact.parentcustomerid_account?.name || 
+                                   currentContact.parentcustomerid_account?.accountname ||
+                                   'Your Organization'
+                console.log('✅ FRONTEND: Returning user account name:', accountName)
+                return accountName
+            } else {
+                console.log('⚠️ FRONTEND: No user contact available in context')
+                return 'Your Organization'
             }
         }
         

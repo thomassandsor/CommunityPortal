@@ -164,7 +164,9 @@ export const handler = async (event) => {
             const filter = buildSecureEmailFilter(sanitizedEmail)
             // Include account information for organization features
             const select = 'contactid,firstname,lastname,emailaddress1,mobilephone,createdon,modifiedon,cp_portaladmin,_parentcustomerid_value'
-            const url = `${DATAVERSE_URL}/api/data/v9.0/contacts?$filter=${encodeURIComponent(filter)}&$select=${select}`
+            // Expand parent customer (account) to get organization name
+            const expand = 'parentcustomerid_account($select=accountid,name)'
+            const url = `${DATAVERSE_URL}/api/data/v9.0/contacts?$filter=${encodeURIComponent(filter)}&$select=${select}&$expand=${expand}`
 
             const response = await fetch(url, {
                 method: 'GET',

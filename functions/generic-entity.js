@@ -897,6 +897,8 @@ async function handleCreateRequest(accessToken, entityConfig, userContact, reque
     // Sanitize rich text fields for Dataverse compatibility with form metadata
     const sanitizedData = sanitizeDataForDataverse(data, entityConfig, formMetadata)
     
+    console.log(`🧹 After sanitize, before adding ownership:`, JSON.stringify(sanitizedData))
+    
     // SECURITY: Always set user ownership - contact GUID is guaranteed at this point
     if (entityConfig.contactRelationField) {
         // Standard user entity - set contact ownership
@@ -906,18 +908,40 @@ async function handleCreateRequest(accessToken, entityConfig, userContact, reque
         const contactBindField = `${navigationProperty}@odata.bind`
         sanitizedData[contactBindField] = `/contacts(${userContact.contactid})`
         logDebug(`🛡️ SECURITY: User ownership set - ${contactBindField} = /contacts(${userContact.contactid})`)
-    } else if (!userContact.cp_portaladmin) {
+    }
+    
+    // Check if this is a system entity (no contact or account relation) and requires admin
+    if (!entityConfig.contactRelationField && !entityConfig.accountRelationField && !userContact.cp_portaladmin) {
         // System entity requires admin access
         throw new Error('Admin access required to create this type of record')
-    } else {
+    }
+    
+    if (!entityConfig.contactRelationField && !entityConfig.accountRelationField) {
         // Admin creating system entity
         logDebug(`🛡️ SECURITY: Admin creating system entity ${entityConfig.entityLogicalName}`)
+    }
+    
+    // SECURITY: Set account relationship if configured and account GUID is available
+    if (entityConfig.accountRelationField && userContact._parentcustomerid_value) {
+        // First, remove any _parentcustomerid_value that might have been included
+        const accountLookupField = `_${entityConfig.accountRelationField}_value`
+        if (sanitizedData[accountLookupField]) {
+            console.log(`🗑️ Removing ${accountLookupField} from sanitized data (will use @odata.bind instead)`)
+            delete sanitizedData[accountLookupField]
+        }
+        
+        const navigationProperty = getNavigationPropertyForLookupField(accountLookupField, entityConfig)
+        const accountBindField = `${navigationProperty}@odata.bind`
+        sanitizedData[accountBindField] = `/accounts(${userContact._parentcustomerid_value})`
+        console.log(`🏢 ACCOUNT: Set account ownership - ${accountBindField} = /accounts(${userContact._parentcustomerid_value})`)
     }
 
     // Using process.env.DATAVERSE_URL directly to avoid initialization issues
     const url = `${process.env.DATAVERSE_URL}/api/data/v9.0/${getEntitySetName(entityConfig.entityLogicalName)}`
     
     logDebug(`🧹 Sanitized data for create:`, sanitizedData)
+    logDebug(`📡 Sending POST to Dataverse:`, url)
+    logDebug(`📦 Request body:`, JSON.stringify(sanitizedData, null, 2))
     
     const response = await fetchWithTimeout(url, {
         method: 'POST',
@@ -966,7 +990,8 @@ function isSystemField(fieldName) {
  * Sanitize data for Dataverse compatibility - only include form-editable fields
  */
 function sanitizeDataForDataverse(data, entityConfig, formMetadata = null) {
-    logDebug(`🧹 Starting data sanitization for entity: ${entityConfig.entityLogicalName}`)
+    console.log(`🧹 SANITIZE START: ${entityConfig.entityLogicalName}`)
+    console.log(`🧹 Incoming data:`, JSON.stringify(data))
     
     const editableData = {}
     
@@ -1024,119 +1049,64 @@ function sanitizeDataForDataverse(data, entityConfig, formMetadata = null) {
                 fieldName === 'modifiedon' || 
                 fieldName === 'createdby' || 
                 fieldName === 'modifiedby') {
-                logDebug(`⏭️ Skipping system read-only field: ${fieldName}`)
                 return
             }
             
-            // CRITICAL DEBUG: Log field details for lookup detection
-            logDebug(`🔍 FIELD ANALYSIS: ${fieldName}`)
-            logDebug(`🔍   controlType: "${field.controlType}"`)
-            logDebug(`🔍   ends with _value: ${fieldName.endsWith('_value')}`)
-            logDebug(`🔍   data has field: ${data.hasOwnProperty(fieldName)}`)
-            logDebug(`🔍   data value: "${data[fieldName]}"`)
+            // Special case: parentcustomerid is a standard Customer lookup field
+            const isParentCustomerField = fieldName.toLowerCase() === 'parentcustomerid'
             
-            // Handle lookup fields with proper Dataverse syntax - check both controlType and field name pattern
-            if (field.controlType === 'lookup' || fieldName.endsWith('_value')) {
-                logDebug(`🎯 LOOKUP FIELD DETECTED: ${fieldName} (condition met)`);
+            // Handle lookup fields with proper Dataverse syntax
+            if (field.controlType === 'lookup' || fieldName.endsWith('_value') || isParentCustomerField) {
                 if (data.hasOwnProperty(fieldName) && data[fieldName]) {
-                    // Convert lookup field to Dataverse @odata.bind format
                     const lookupValue = data[fieldName]
-                    logDebug(`🔗 Processing lookup field: ${fieldName} = ${lookupValue}`)
+                    if (!lookupValue || lookupValue === '') return
                     
-                    // Skip empty lookup values (already handled in frontend)
-                    if (!lookupValue || lookupValue === '') {
-                        logDebug(`⏭️ Skipping empty lookup field: ${fieldName}`)
-                        return
-                    }
-                    
-                    // Convert to navigation property format for Dataverse
                     const navigationProperty = getNavigationPropertyForLookupField(fieldName, entityConfig)
                     const entitySetName = getEntitySetNameForLookupField(fieldName)
-                    
-                    logDebug(`🔍 LOOKUP CONVERSION DEBUG:`)
-                    logDebug(`🔍   Input field: ${fieldName}`)
-                    logDebug(`🔍   Input value: ${lookupValue}`)
-                    logDebug(`🔍   Input value type: ${typeof lookupValue}`)
-                    logDebug(`🔍   Navigation property: ${navigationProperty}`)
-                    logDebug(`🔍   Entity set: ${entitySetName}`)
                     
                     if (navigationProperty && entitySetName) {
                         const odataBindKey = `${navigationProperty}@odata.bind`
                         const odataBindValue = `/${entitySetName}(${lookupValue})`
-                        
-                        logDebug(`🚀 ODATA CONVERSION EXECUTING:`)
-                        logDebug(`🚀   From: ${fieldName} = ${lookupValue}`)
-                        logDebug(`🚀   To: ${odataBindKey} = ${odataBindValue}`)
-                        
                         editableData[odataBindKey] = odataBindValue
-                        
-                        logDebug(`✅ CONVERSION COMPLETE: Added to editableData`);
-                        logDebug(`✅ LOOKUP CONVERTED SUCCESSFULLY:`)
-                        logDebug(`✅   Original: ${fieldName} = ${lookupValue}`)
-                        logDebug(`✅   Converted: ${odataBindKey} = ${odataBindValue}`)
-                        logDebug(`✅   Expected pattern: "cp_Contact@odata.bind": "/contacts(12341234-1234-1234-1234-123412341234)"`)
-                        logDebug(`✅   Matches WebAPI pattern: record["cp_Contact@odata.bind"] = "/contacts(guid)"`)
+                        console.log(`✅ DIRECT LOOKUP: ${fieldName} → ${odataBindKey} = ${odataBindValue}`)
                     } else {
-                        logDebug(`❌ LOOKUP CONVERSION FAILED:`)
-                        logDebug(`❌   Could not determine navigation property for: ${fieldName}`)
-                        logDebug(`❌   Navigation property: ${navigationProperty}`)
-                        logDebug(`❌   Entity set: ${entitySetName}`)
-                        logDebug(`❌   Available mappings:`, Object.keys(getFieldNavigationPropertyMap(entityConfig)))
+                        console.error(`❌ Failed to convert ${fieldName}: nav=${navigationProperty}, set=${entitySetName}`)
                     }
-                } else {
-                    logDebug(`⏭️ Lookup field ${fieldName} not provided or empty - skipping`)
                 }
                 return
             }
             
-            // CRITICAL FIX: Check if this form field corresponds to a lookup field in the incoming data
-            // Form shows 'cp_contact' but data contains '_cp_contact_value'
+            // Check if form field corresponds to a lookup in data (e.g., form has 'parentcustomerid', data has '_parentcustomerid_value')
             const correspondingLookupField = `_${fieldName}_value`
             if (data.hasOwnProperty(correspondingLookupField) && data[correspondingLookupField]) {
-                logDebug(`🔧 LOOKUP FIELD MAPPING: Form field '${fieldName}' maps to data field '${correspondingLookupField}'`)
-                
                 const lookupValue = data[correspondingLookupField]
-                logDebug(`🔗 Processing mapped lookup: ${correspondingLookupField} = ${lookupValue}`)
-                
-                // Convert to @odata.bind format using the actual lookup field name
                 const navigationProperty = getNavigationPropertyForLookupField(correspondingLookupField, entityConfig)
                 const entitySetName = getEntitySetNameForLookupField(correspondingLookupField)
+                
+                console.log(`🔧 MAPPED LOOKUP: ${fieldName} → ${correspondingLookupField}`, {navigationProperty, entitySetName, lookupValue})
                 
                 if (navigationProperty && entitySetName) {
                     const odataBindKey = `${navigationProperty}@odata.bind`
                     const odataBindValue = `/${entitySetName}(${lookupValue})`
-                    
                     editableData[odataBindKey] = odataBindValue
-                    logDebug(`✅ MAPPED LOOKUP CONVERSION: ${fieldName} (${correspondingLookupField}) → ${odataBindKey} = ${odataBindValue}`)
+                    console.log(`✅ MAPPED: ${odataBindKey} = ${odataBindValue}`)
                 } else {
-                    console.error(`❌ Could not convert mapped lookup field: ${correspondingLookupField}`)
+                    console.error(`❌ Failed: nav=${navigationProperty}, set=${entitySetName}`)
                 }
                 return
             }
             
-            // Include the field if it exists in the data
+            // Include regular field if it exists in the data
             if (data.hasOwnProperty(fieldName)) {
                 editableData[fieldName] = data[fieldName]
-                
-                // Apply rich text sanitization if needed
                 if (field.controlType === 'richtext' && typeof editableData[fieldName] === 'string') {
-                    logDebug(`🧹 Sanitizing rich text field: ${fieldName}`)
-                    logDebug(`📄 Original content preview:`, editableData[fieldName].substring(0, 100))
                     editableData[fieldName] = sanitizeRichTextForDataverse(editableData[fieldName])
-                    logDebug(`✅ Sanitized content preview:`, editableData[fieldName].substring(0, 100))
                 }
-                
-                logDebug(`✅ Including form field: ${fieldName} (${field.controlType || 'text'})`)
-            } else {
-                logDebug(`⚠️ Form field ${fieldName} not found in request data`)
             }
         })
     }
     
-    // Form metadata is required - no fallback processing allowed
-    
-    logDebug(`🧹 Final editable fields to update:`, Object.keys(editableData))
-    logDebug(`🧹 Excluded from update:`, Object.keys(data).filter(key => !editableData.hasOwnProperty(key)))
+    console.log(`🧹 SANITIZE END: Final data:`, JSON.stringify(editableData))
     
     return editableData
 }
@@ -2685,7 +2655,7 @@ function getFieldNavigationPropertyMap(entityConfig) {
         '_createdby_value': 'createdby',
         '_modifiedby_value': 'modifiedby',
         '_ownerid_value': 'ownerid',
-        '_parentcustomerid_value': 'parentcustomerid_account'
+        '_parentcustomerid_value': 'parentcustomerid_account'  // Customer field pointing to Account (typed navigation property)
     }
     
     // Add configured contact field mapping if available
